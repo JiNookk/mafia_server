@@ -5,6 +5,7 @@ import com.jingwook.mafia_server.domains.User;
 import com.jingwook.mafia_server.dtos.SessionResponseDto;
 import com.jingwook.mafia_server.exceptions.UserAlreadyExistException;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.data.redis.core.ReactiveValueOperations;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -20,7 +21,7 @@ public class AuthService {
 
     private static final String SESSION_PREFIX = "session:";
     private static final String NICKNAME_PREFIX = "nickname:";
-    private static final Duration SESSION_TTL    = Duration.ofHours(1);
+    private static final Duration SESSION_TTL = Duration.ofHours(1);
 
     public AuthService(ReactiveRedisTemplate<String, String> redisTemplate, ObjectMapper objectMapper){
         this.redisTemplate = redisTemplate;
@@ -34,9 +35,22 @@ public class AuthService {
 
     public Mono<SessionResponseDto> signup(String nickname) {
         return checkNicknameExists(nickname)
-                .flatMap(exists -> exists ?
-                        Mono.error(new UserAlreadyExistException("User already exists!"))
+                .flatMap(exists -> exists
+                        ? renewUserSession(nickname)
                         : createUserSession(nickname)
+                );
+    }
+
+    private Mono<SessionResponseDto> renewUserSession(String nickname) {
+        System.out.println("renew");
+        return redisTemplate.opsForValue()
+                .get(nickname)
+                .doOnNext(sessionId -> System.out.println(sessionId))
+                .flatMap(sessionId ->
+                        redisTemplate.expire(nickname, SESSION_TTL)
+                                .thenReturn(
+                                        new SessionResponseDto(sessionId, nickname)
+                                )
                 );
     }
 
