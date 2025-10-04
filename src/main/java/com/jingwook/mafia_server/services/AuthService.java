@@ -11,7 +11,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-public class UserService {
+public class AuthService {
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
@@ -20,7 +20,7 @@ public class UserService {
     private static final String NICKNAME_PREFIX = "nickname:";
     private static final Duration SESSION_TTL    = Duration.ofHours(1);
 
-    public UserService(ReactiveRedisTemplate<String, String> redisTemplate, ObjectMapper objectMapper){
+    public AuthService(ReactiveRedisTemplate<String, String> redisTemplate, ObjectMapper objectMapper){
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
     }
@@ -30,7 +30,7 @@ public class UserService {
         return redisTemplate.hasKey(NICKNAME_PREFIX + nickname);
     }
 
-    public Mono<SessionResponseDto> joinUser(String nickname) {
+    public Mono<SessionResponseDto> signup(String nickname) {
         return checkNicknameExists(nickname)
                 .flatMap(exists -> exists ?
                         Mono.error(new UserAlreadyExistException("User already exists!"))
