@@ -16,6 +16,11 @@ import reactor.core.publisher.Mono;
 public class AuthController {
     private AuthService authService;
 
+    public AuthController(AuthService authService) {
+        this.authService = authService;
+    }
+
+
     @PostMapping("/signup")
     public Mono<ResponseEntity<SessionResponseDto>> signup(@RequestBody SignupDto body){
         return authService.signup(body.getNickname())

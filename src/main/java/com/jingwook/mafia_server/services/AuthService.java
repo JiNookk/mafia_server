@@ -5,12 +5,14 @@ import com.jingwook.mafia_server.domains.User;
 import com.jingwook.mafia_server.dtos.SessionResponseDto;
 import com.jingwook.mafia_server.exceptions.UserAlreadyExistException;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+@Service
 public class AuthService {
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
