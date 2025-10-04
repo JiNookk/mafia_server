@@ -1,7 +1,10 @@
 package com.jingwook.mafia_server.domains;
 
+import lombok.Getter;
+
 import java.time.LocalDateTime;
 
+@Getter
 public class User {
     private final String sessionId;
     private final String nickname;
