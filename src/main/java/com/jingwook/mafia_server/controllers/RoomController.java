@@ -22,7 +22,6 @@ public class RoomController {
     public Mono<OffsetPaginationDto<RoomListResponse>> getList(
             GetRoomListQueryDto query
     ){
-        System.out.println("room!");
         return roomService.getList(query);
     }
 }
