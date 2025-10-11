@@ -27,7 +27,14 @@ replay_pid*
 
 build/*
 
+# idea
 .idea/*
+
+# vscode
+.vscode/*
+
+# macos
+.DS_Store
 
 # claude
 .claude/
