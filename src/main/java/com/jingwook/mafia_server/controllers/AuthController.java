@@ -33,7 +33,7 @@ public class AuthController {
     public Mono<ResponseEntity<String>> checkSession(
             @Valid @RequestBody SessionRequestDto body) {
 
-        return authService.checkSession(body.getSessionId())
+        return authService.checkSession(body.getUserId())
                 .map(exists -> exists ? ResponseEntity.ok(HttpStatus.OK.toString())
                         : ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
     }

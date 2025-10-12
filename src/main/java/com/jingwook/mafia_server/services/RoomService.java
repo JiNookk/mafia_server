@@ -2,20 +2,13 @@ package com.jingwook.mafia_server.services;
 
 import static com.jingwook.mafia_server.utils.Constants.MAX_PLAYERS;
 import static com.jingwook.mafia_server.utils.Constants.MIN_PLAYERS;
-import static com.jingwook.mafia_server.utils.Constants.ROOM_PREFIX;
-import static com.jingwook.mafia_server.utils.Constants.USER_PREFIX;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
-import org.springframework.data.domain.Range;
-import org.springframework.data.redis.core.ReactiveHashOperations;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
-import org.springframework.data.redis.core.ReactiveZSetOperations;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.github.f4b6a3.uuid.UuidCreator;
@@ -28,8 +21,12 @@ import com.jingwook.mafia_server.dtos.OffsetPaginationMetadata;
 import com.jingwook.mafia_server.dtos.RoomDetailResponse;
 import com.jingwook.mafia_server.dtos.RoomListResponse;
 import com.jingwook.mafia_server.dtos.RoomMemberResponse;
+import com.jingwook.mafia_server.entities.RoomEntity;
+import com.jingwook.mafia_server.entities.RoomMemberEntity;
 import com.jingwook.mafia_server.enums.ParticipatingRole;
 import com.jingwook.mafia_server.enums.RoomStatus;
+import com.jingwook.mafia_server.repositories.RoomMemberR2dbcRepository;
+import com.jingwook.mafia_server.repositories.RoomR2dbcRepository;
 import com.jingwook.mafia_server.repositories.UserRepository;
 
 import reactor.core.publisher.Flux;
@@ -37,64 +34,37 @@ import reactor.core.publisher.Mono;
 
 @Service
 public class RoomService {
-        private final ReactiveRedisTemplate<String, String> redisTemplate;
-        private final ReactiveZSetOperations<String, String> zSetOperations;
-        private final ReactiveHashOperations<String, Object, Object> hashOperations;
+        private final RoomR2dbcRepository roomR2dbcRepository;
+        private final RoomMemberR2dbcRepository roomMemberR2dbcRepository;
         private final UserRepository userRepository;
 
-        public RoomService(ReactiveRedisTemplate<String, String> redisTemplate, UserRepository userRepository) {
-                this.redisTemplate = redisTemplate;
+        public RoomService(RoomR2dbcRepository roomR2dbcRepository,
+                          RoomMemberR2dbcRepository roomMemberR2dbcRepository,
+                          UserRepository userRepository) {
+                this.roomR2dbcRepository = roomR2dbcRepository;
+                this.roomMemberR2dbcRepository = roomMemberR2dbcRepository;
                 this.userRepository = userRepository;
-                zSetOperations = redisTemplate.opsForZSet();
-                hashOperations = redisTemplate.opsForHash();
         }
 
         public Mono<OffsetPaginationDto<RoomListResponse>> getList(GetRoomListQueryDto query) {
                 long page = query.getPage();
                 long limit = query.getLimit();
-                long start = page * limit;
-                long end = (page + 1) * limit - 1;
+                long offset = page * limit;
 
-                Mono<Long> totalCountMono = zSetOperations.size(ROOM_PREFIX);
+                Mono<Long> totalCountMono = roomR2dbcRepository.countAll();
 
-                Mono<List<RoomListResponse>> roomListMono = zSetOperations
-                                .reverseRange(ROOM_PREFIX, Range.leftOpen(start, end))
-                                .collectList()
-                                .flatMapMany(roomIds -> {
-                                        if (roomIds.isEmpty()) {
-                                                return Flux.empty();
-                                        }
+                Flux<RoomListResponse> roomListFlux = roomR2dbcRepository
+                                .findAllWithPagination(offset, limit)
+                                .flatMap(roomEntity ->
+                                        roomMemberR2dbcRepository.countByRoomId(roomEntity.getRoomId())
+                                                .map(currentPlayers -> new RoomListResponse(
+                                                        roomEntity.getRoomId(),
+                                                        roomEntity.getName(),
+                                                        currentPlayers.intValue(),
+                                                        roomEntity.getMaxPlayers(),
+                                                        roomEntity.getStatusAsEnum())));
 
-                                        List<Mono<RoomListResponse>> roomMonos = roomIds
-                                                        .stream()
-                                                        .map(roomId -> hashOperations
-                                                                        .entries(ROOM_PREFIX + roomId)
-                                                                        .collectMap(Map.Entry::getKey,
-                                                                                        Map.Entry::getValue)
-                                                                        .map(
-                                                                                        data -> new RoomListResponse(
-                                                                                                        roomId,
-                                                                                                        data.get("name").toString(),
-                                                                                                        Integer.parseInt(
-                                                                                                                        data.getOrDefault(
-                                                                                                                                        "currentPlayers",
-                                                                                                                                        "0")
-                                                                                                                                        .toString()),
-                                                                                                        Integer.parseInt(
-                                                                                                                        data.getOrDefault(
-                                                                                                                                        "maxPlayers",
-                                                                                                                                        "0")
-                                                                                                                                        .toString()),
-                                                                                                        RoomStatus.valueOf(
-                                                                                                                        data.get("status")
-                                                                                                                                        .toString()))))
-                                                        .collect(Collectors.toUnmodifiableList());
-
-                                        return Flux.concat(roomMonos);
-                                })
-                                .collectList();
-
-                return Mono.zip(roomListMono, totalCountMono)
+                return Mono.zip(roomListFlux.collectList(), totalCountMono)
                                 .map(tuple -> {
                                         List<RoomListResponse> rooms = tuple.getT1();
                                         Long totalCount = tuple.getT2();
@@ -108,19 +78,16 @@ public class RoomService {
         }
 
         private Mono<Boolean> checkUserInRoom(String userId) {
-                return redisTemplate.opsForValue().get(USER_PREFIX + userId + ":rooms")
-                                .switchIfEmpty(Mono.just("empty"))
-                                .flatMap(exists -> {
-                                        return Mono.just(exists != "empty");
-                                });
+                return roomMemberR2dbcRepository.existsByUserId(userId);
         }
 
+        @Transactional
         public Mono<RoomDetailResponse> create(CreateRoomDto body) {
                 String userName = body.getUsername();
                 String roomName = body.getRoomName();
 
                 return userRepository.findByUsername(userName)
-                                .flatMap(user -> checkUserInRoom(user.getSessionId())
+                                .flatMap(user -> checkUserInRoom(user.getId())
                                                 .flatMap(exist -> exist
                                                                 ? Mono.error(new ResponseStatusException(
                                                                                 HttpStatus.BAD_REQUEST,
@@ -128,45 +95,38 @@ public class RoomService {
                                                                 : Mono.just(user)))
                                 .flatMap(user -> {
                                         String roomId = UuidCreator.getTimeOrderedEpoch().toString();
-                                        Room room = new Room(roomId, roomName, MIN_PLAYERS, MAX_PLAYERS,
-                                                        RoomStatus.AVAILABLE, user.getSessionId(), LocalDateTime.now());
+                                        LocalDateTime now = LocalDateTime.now();
 
-                                        RoomMember roomMember = new RoomMember(user.getSessionId(), roomId,
-                                                        ParticipatingRole.HOST);
+                                        // Room Entity 생성 및 저장
+                                        RoomEntity roomEntity = RoomEntity.builder()
+                                                        .roomId(roomId)
+                                                        .name(roomName)
+                                                        .maxPlayers(MAX_PLAYERS)
+                                                        .status(RoomStatus.AVAILABLE.toString())
+                                                        .hostUserId(user.getId())
+                                                        .createdAt(now)
+                                                        .updatedAt(now)
+                                                        .build();
 
-                                        return Mono.when(
-                                                        redisTemplate.opsForValue()
-                                                                        .set(USER_PREFIX + user
-                                                                                        .getSessionId()
-                                                                                        + ":rooms",
-                                                                                        roomId),
-                                                        redisTemplate.opsForHash().putAll(
-                                                                        ROOM_PREFIX + roomId,
-                                                                        room.toMap()),
-                                                        redisTemplate.opsForHash().putAll(
-                                                                        ROOM_PREFIX + roomId
-                                                                                        + ":member:"
-                                                                                        + roomMember.getPlayerId(),
-                                                                        roomMember.toMap()),
-                                                        redisTemplate.opsForZSet().add(
-                                                                        ROOM_PREFIX,
-                                                                        roomId,
-                                                                        System.currentTimeMillis()),
-                                                        redisTemplate.opsForZSet().add(
-                                                                        ROOM_PREFIX + roomId
-                                                                                        + ":members",
-                                                                        roomMember.getPlayerId(),
-                                                                        System.currentTimeMillis()))
-                                                        .thenReturn(new RoomDetailResponse(
-                                                                        room.getId(),
-                                                                        room.getName(),
-                                                                        List.of(new RoomMemberResponse(
-                                                                                        roomMember.getPlayerId(),
-                                                                                        roomMember.getRole())),
-                                                                        room.getCurrentPlayers(),
-                                                                        room.getMaxPlayers()));
+                                        // Room Member Entity 생성 및 저장
+                                        RoomMemberEntity roomMemberEntity = RoomMemberEntity.builder()
+                                                        .roomId(roomId)
+                                                        .userId(user.getId())
+                                                        .role(ParticipatingRole.HOST.toString())
+                                                        .joinedAt(now)
+                                                        .build();
 
+                                        return Mono.zip(
+                                                        roomR2dbcRepository.save(roomEntity),
+                                                        roomMemberR2dbcRepository.save(roomMemberEntity)
+                                        ).then(Mono.just(new RoomDetailResponse(
+                                                        roomId,
+                                                        roomName,
+                                                        List.of(new RoomMemberResponse(
+                                                                        user.getId(),
+                                                                        ParticipatingRole.HOST)),
+                                                        1,
+                                                        MAX_PLAYERS)));
                                 });
-
         }
 }
