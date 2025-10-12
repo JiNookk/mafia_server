@@ -55,10 +55,10 @@ public class RoomService {
                 long start = page * limit;
                 long end = (page + 1) * limit - 1;
 
-                Mono<Long> totalCountMono = zSetOperations.size("rooms:");
+                Mono<Long> totalCountMono = zSetOperations.size(ROOM_PREFIX);
 
                 Mono<List<RoomListResponse>> roomListMono = zSetOperations
-                                .reverseRange("rooms:", Range.leftOpen(start, end))
+                                .reverseRange(ROOM_PREFIX, Range.leftOpen(start, end))
                                 .collectList()
                                 .flatMapMany(roomIds -> {
                                         if (roomIds.isEmpty()) {
@@ -67,28 +67,27 @@ public class RoomService {
 
                                         List<Mono<RoomListResponse>> roomMonos = roomIds
                                                         .stream()
-                                                        .map(
-                                                                        roomId -> hashOperations
-                                                                                        .entries("room:" + roomId)
-                                                                                        .collectMap(Map.Entry::getKey,
-                                                                                                        Map.Entry::getValue)
-                                                                                        .map(
-                                                                                                        data -> new RoomListResponse(
-                                                                                                                        roomId,
-                                                                                                                        data.get("name").toString(),
-                                                                                                                        Integer.parseInt(
-                                                                                                                                        data.getOrDefault(
-                                                                                                                                                        "currentPlayers",
-                                                                                                                                                        "0")
-                                                                                                                                                        .toString()),
-                                                                                                                        Integer.parseInt(
-                                                                                                                                        data.getOrDefault(
-                                                                                                                                                        "maxPlayers",
-                                                                                                                                                        "0")
-                                                                                                                                                        .toString()),
-                                                                                                                        RoomStatus.fromKorean(
-                                                                                                                                        data.get("status")
-                                                                                                                                                        .toString()))))
+                                                        .map(roomId -> hashOperations
+                                                                        .entries(ROOM_PREFIX + roomId)
+                                                                        .collectMap(Map.Entry::getKey,
+                                                                                        Map.Entry::getValue)
+                                                                        .map(
+                                                                                        data -> new RoomListResponse(
+                                                                                                        roomId,
+                                                                                                        data.get("name").toString(),
+                                                                                                        Integer.parseInt(
+                                                                                                                        data.getOrDefault(
+                                                                                                                                        "currentPlayers",
+                                                                                                                                        "0")
+                                                                                                                                        .toString()),
+                                                                                                        Integer.parseInt(
+                                                                                                                        data.getOrDefault(
+                                                                                                                                        "maxPlayers",
+                                                                                                                                        "0")
+                                                                                                                                        .toString()),
+                                                                                                        RoomStatus.valueOf(
+                                                                                                                        data.get("status")
+                                                                                                                                        .toString()))))
                                                         .collect(Collectors.toUnmodifiableList());
 
                                         return Flux.concat(roomMonos);
@@ -150,7 +149,7 @@ public class RoomService {
                                                                                         + roomMember.getPlayerId(),
                                                                         roomMember.toMap()),
                                                         redisTemplate.opsForZSet().add(
-                                                                        "rooms:",
+                                                                        ROOM_PREFIX,
                                                                         roomId,
                                                                         System.currentTimeMillis()),
                                                         redisTemplate.opsForZSet().add(
