@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.5.6'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'com.diffplug.spotless' version '6.23.3'
 }
 
 group = 'com.jingwook'
@@ -29,6 +30,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'com.github.f4b6a3:uuid-creator:5.3.2'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'com.h2database:h2'
