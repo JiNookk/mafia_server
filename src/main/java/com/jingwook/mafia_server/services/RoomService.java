@@ -108,12 +108,11 @@ public class RoomService {
                                 });
         }
 
-        // 유저가 있으면 에러 던져야 함.
         private Mono<Boolean> checkUserInRoom(String userId) {
                 return redisTemplate.opsForValue().get(USER_PREFIX + userId + ":rooms")
-                                .switchIfEmpty(Mono.just(null))
+                                .switchIfEmpty(Mono.just("empty"))
                                 .flatMap(exists -> {
-                                        return Mono.just(exists != null);
+                                        return Mono.just(exists != "empty");
                                 });
         }
 
