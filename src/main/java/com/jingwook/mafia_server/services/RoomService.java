@@ -106,11 +106,25 @@ public class RoomService {
                                 });
         }
 
+        // 유저가 있으면 에러 던져야 함.
+        private Mono<Boolean> checkUserInRoom(String userId) {
+                return redisTemplate.opsForValue().get(USER_PREFIX + userId + ":rooms")
+                                .switchIfEmpty(Mono.just(null))
+                                .flatMap(exists -> {
+                                        return Mono.just(exists != null);
+                                });
+        }
+
         public Mono<RoomDetailResponse> create(CreateRoomDto body) {
                 String userName = body.getUsername();
                 String roomName = body.getRoomName();
 
                 return userRepository.findByUsername(userName)
+                                .flatMap(user -> checkUserInRoom(user.getSessionId())
+                                                .flatMap(exist -> exist
+                                                                ? Mono.error(new RuntimeException(
+                                                                                "User is already in a room"))
+                                                                : Mono.just(user)))
                                 .flatMap(user -> {
                                         String roomId = UuidCreator.getTimeOrderedEpoch().toString();
                                         Room room = new Room(roomId, roomName, MIN_PLAYERS, MAX_PLAYERS,
@@ -119,43 +133,38 @@ public class RoomService {
                                         RoomMember roomMember = new RoomMember(user.getSessionId(), roomId,
                                                         ParticipatingRole.HOST);
 
-                                        return redisTemplate.opsForValue()
-                                                        .get(USER_PREFIX + user.getSessionId() + ":rooms")
-                                                        .flatMap(exists -> {
-                                                                if (exists != null) {
-                                                                        return Mono.error(new RuntimeException(
-                                                                                        "User is already in a room"));
-                                                                }
-                                                                return Mono.when(
-                                                                                redisTemplate.opsForValue()
-                                                                                                .set(USER_PREFIX + user
-                                                                                                                .getSessionId()
-                                                                                                                + ":rooms",
-                                                                                                                roomId),
-                                                                                redisTemplate.opsForHash().putAll(
-                                                                                                ROOM_PREFIX + roomId,
-                                                                                                room.toMap()),
-                                                                                redisTemplate.opsForHash().putAll(
-                                                                                                ROOM_PREFIX + roomId + ":member:" + roomMember.getPlayerId(),
-                                                                                                roomMember.toMap()),
-                                                                                redisTemplate.opsForZSet().add(
-                                                                                                "rooms:",
-                                                                                                roomId,
-                                                                                                System.currentTimeMillis()),
-                                                                                redisTemplate.opsForZSet().add(
-                                                                                                ROOM_PREFIX + roomId
-                                                                                                                + ":members",
-                                                                                                roomMember.getPlayerId(),
-                                                                                                System.currentTimeMillis()))
-                                                                                .thenReturn(new RoomDetailResponse(
-                                                                                                room.getId(),
-                                                                                                room.getName(),
-                                                                                                List.of(new RoomMemberResponse(
-                                                                                                                roomMember.getPlayerId(),
-                                                                                                                roomMember.getRole())),
-                                                                                                room.getCurrentPlayers(),
-                                                                                                room.getMaxPlayers()));
-                                                        });
+                                        return Mono.when(
+                                                        redisTemplate.opsForValue()
+                                                                        .set(USER_PREFIX + user
+                                                                                        .getSessionId()
+                                                                                        + ":rooms",
+                                                                                        roomId),
+                                                        redisTemplate.opsForHash().putAll(
+                                                                        ROOM_PREFIX + roomId,
+                                                                        room.toMap()),
+                                                        redisTemplate.opsForHash().putAll(
+                                                                        ROOM_PREFIX + roomId
+                                                                                        + ":member:"
+                                                                                        + roomMember.getPlayerId(),
+                                                                        roomMember.toMap()),
+                                                        redisTemplate.opsForZSet().add(
+                                                                        "rooms:",
+                                                                        roomId,
+                                                                        System.currentTimeMillis()),
+                                                        redisTemplate.opsForZSet().add(
+                                                                        ROOM_PREFIX + roomId
+                                                                                        + ":members",
+                                                                        roomMember.getPlayerId(),
+                                                                        System.currentTimeMillis()))
+                                                        .thenReturn(new RoomDetailResponse(
+                                                                        room.getId(),
+                                                                        room.getName(),
+                                                                        List.of(new RoomMemberResponse(
+                                                                                        roomMember.getPlayerId(),
+                                                                                        roomMember.getRole())),
+                                                                        room.getCurrentPlayers(),
+                                                                        room.getMaxPlayers()));
+
                                 });
 
         }

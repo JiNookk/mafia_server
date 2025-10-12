@@ -20,22 +20,20 @@ public class UserRepository {
     }
 
     public Mono<User> findByUsername(String userName) {
-        return redisTemplate.opsForValue().get(userName).flatMap(userJsonString -> {
+        return redisTemplate.opsForValue().get(userName)
+                .switchIfEmpty(Mono.error(new RuntimeException("User not found")))
+                .flatMap(userJsonString -> {
 
-            if (userJsonString == null) {
-                return Mono.error(new RuntimeException("User not found"));
-            }
+                    try {
+                        User user = objectMapper.readValue(userJsonString, User.class);
 
-            try {
-                User user = objectMapper.readValue(userJsonString, User.class);
+                        return Mono.just(user);
 
-                return Mono.just(user);
+                    } catch (JsonProcessingException e) {
+                        return Mono.error(new RuntimeException(e));
+                    }
 
-            } catch (JsonProcessingException e) {
-                return Mono.error(new RuntimeException(e));
-            }
-
-        });
+                });
     }
 
 }
