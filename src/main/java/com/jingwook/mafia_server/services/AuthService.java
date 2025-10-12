@@ -1,6 +1,9 @@
 package com.jingwook.mafia_server.services;
 
-import java.time.Duration;
+import static com.jingwook.mafia_server.utils.Constants.NICKNAME_PREFIX;
+import static com.jingwook.mafia_server.utils.Constants.SESSION_PREFIX;
+import static com.jingwook.mafia_server.utils.Constants.SESSION_TTL;
+
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -10,6 +13,7 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jingwook.mafia_server.domains.User;
 import com.jingwook.mafia_server.dtos.SessionResponseDto;
+import com.jingwook.mafia_server.repositories.UserRepository;
 
 import reactor.core.publisher.Mono;
 
@@ -17,14 +21,13 @@ import reactor.core.publisher.Mono;
 public class AuthService {
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final UserRepository userRepository;
 
-    private static final String SESSION_PREFIX = "session:";
-    private static final String NICKNAME_PREFIX = "nickname:";
-    private static final Duration SESSION_TTL = Duration.ofHours(1);
-
-    public AuthService(ReactiveRedisTemplate<String, String> redisTemplate, ObjectMapper objectMapper) {
+    public AuthService(ReactiveRedisTemplate<String, String> redisTemplate, ObjectMapper objectMapper,
+            UserRepository userRepository) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
+        this.userRepository = userRepository;
     }
 
     private Mono<Boolean> checkNicknameExists(String nickname) {
@@ -39,11 +42,9 @@ public class AuthService {
     }
 
     private Mono<SessionResponseDto> renewUserSession(String nickname) {
-        System.out.println("renew");
         return redisTemplate.opsForValue()
-                .get(nickname)
-                .doOnNext(sessionId -> System.out.println(sessionId))
-                .flatMap(sessionId -> redisTemplate.expire(nickname, SESSION_TTL)
+                .get(NICKNAME_PREFIX + nickname)
+                .flatMap(sessionId -> refreshNickNameTTL(nickname)
                         .thenReturn(
                                 new SessionResponseDto(sessionId, nickname)));
     }
@@ -57,17 +58,38 @@ public class AuthService {
 
             return redisTemplate.opsForValue()
                     .set(SESSION_PREFIX + sessionId, userJson)
-                    .then(
-                            redisTemplate.expire(SESSION_PREFIX + sessionId, SESSION_TTL))
-                    .then(
-                            redisTemplate.opsForValue()
-                                    .set(NICKNAME_PREFIX + nickname, sessionId))
-                    .then(redisTemplate.expire(NICKNAME_PREFIX + nickname, SESSION_TTL))
+                    .then(refreshSessionTTL(sessionId))
+                    .then(redisTemplate.opsForValue()
+                            .set(NICKNAME_PREFIX + nickname, sessionId))
+                    .then(refreshNickNameTTL(nickname))
                     .thenReturn(new SessionResponseDto(sessionId, nickname));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
 
+    }
+
+    private Mono<Boolean> refreshNickNameTTL(String nickname) {
+        return redisTemplate.expire(NICKNAME_PREFIX + nickname, SESSION_TTL);
+    }
+
+    private Mono<Boolean> refreshSessionTTL(String sessionId) {
+        return redisTemplate.expire(SESSION_PREFIX + sessionId, SESSION_TTL);
+    }
+
+    public Mono<Boolean> checkSession(String sessionId) {
+        if (sessionId == null) {
+            return Mono.error(new RuntimeException("SessionId is required"));
+        }
+
+        return redisTemplate.opsForValue()
+                .get(SESSION_PREFIX + sessionId)
+                .flatMap(exist -> {
+                    return userRepository.findById(sessionId)
+                            .flatMap(user -> Mono.when(
+                                    refreshSessionTTL(sessionId),
+                                    refreshNickNameTTL(user.getNickname())).thenReturn(exist != null));
+                });
     };
 
 }

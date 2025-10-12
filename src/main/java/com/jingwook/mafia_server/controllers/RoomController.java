@@ -2,6 +2,7 @@ package com.jingwook.mafia_server.controllers;
 
 import com.jingwook.mafia_server.dtos.*;
 import com.jingwook.mafia_server.services.RoomService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -26,7 +27,7 @@ public class RoomController {
 
     @PostMapping
     public Mono<RoomDetailResponse> create(
-            @RequestBody CreateRoomDto body) {
+            @Valid @RequestBody CreateRoomDto body) {
         return roomService.create(body);
     }
 }

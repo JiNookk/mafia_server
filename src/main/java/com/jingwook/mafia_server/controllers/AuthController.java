@@ -1,9 +1,12 @@
 package com.jingwook.mafia_server.controllers;
 
-
 import com.jingwook.mafia_server.dtos.SessionResponseDto;
 import com.jingwook.mafia_server.dtos.SignupDto;
 import com.jingwook.mafia_server.services.AuthService;
+
+import jakarta.validation.Valid;
+
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,11 +23,18 @@ public class AuthController {
         this.authService = authService;
     }
 
-
     @PostMapping("/signup")
-    public Mono<ResponseEntity<SessionResponseDto>> signup(@RequestBody SignupDto body){
+    public Mono<ResponseEntity<SessionResponseDto>> signup(@RequestBody SignupDto body) {
         return authService.signup(body.getNickname())
                 .map(ResponseEntity::ok);
     }
 
+    @PostMapping("/current")
+    public Mono<ResponseEntity<String>> checkSession(
+            @Valid @RequestBody SessionRequestDto body) {
+
+        return authService.checkSession(body.getSessionId())
+                .map(exists -> exists ? ResponseEntity.ok(HttpStatus.OK.toString())
+                        : ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
+    }
 }

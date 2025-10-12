@@ -14,7 +14,9 @@ import org.springframework.data.domain.Range;
 import org.springframework.data.redis.core.ReactiveHashOperations;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.core.ReactiveZSetOperations;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.github.f4b6a3.uuid.UuidCreator;
 import com.jingwook.mafia_server.domains.Room;
@@ -122,7 +124,8 @@ public class RoomService {
                 return userRepository.findByUsername(userName)
                                 .flatMap(user -> checkUserInRoom(user.getSessionId())
                                                 .flatMap(exist -> exist
-                                                                ? Mono.error(new RuntimeException(
+                                                                ? Mono.error(new ResponseStatusException(
+                                                                                HttpStatus.BAD_REQUEST,
                                                                                 "User is already in a room"))
                                                                 : Mono.just(user)))
                                 .flatMap(user -> {
