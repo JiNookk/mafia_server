@@ -1,10 +1,10 @@
 package com.jingwook.mafia_server.controllers;
 
-import com.jingwook.mafia_server.dtos.GetRoomListQueryDto;
-import com.jingwook.mafia_server.dtos.OffsetPaginationDto;
-import com.jingwook.mafia_server.dtos.RoomListResponse;
+import com.jingwook.mafia_server.dtos.*;
 import com.jingwook.mafia_server.services.RoomService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
@@ -20,8 +20,13 @@ public class RoomController {
 
     @GetMapping
     public Mono<OffsetPaginationDto<RoomListResponse>> getList(
-            GetRoomListQueryDto query
-    ){
+            GetRoomListQueryDto query) {
         return roomService.getList(query);
+    }
+
+    @PostMapping
+    public Mono<RoomDetailResponse> create(
+            @RequestBody CreateRoomDto body) {
+        return roomService.create(body);
     }
 }
