@@ -28,19 +28,7 @@ public class UserRepository {
     public Mono<User> findByUsername(String userName) {
         return redisTemplate.opsForValue().get(NICKNAME_PREFIX + userName)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")))
-                .flatMap(userJsonString -> {
-
-                    try {
-                        User user = objectMapper.readValue(userJsonString, User.class);
-
-                        return Mono.just(user);
-
-                    } catch (JsonProcessingException e) {
-                        return Mono.error(new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
-                                "Failed to parse user data", e));
-                    }
-
-                });
+                .flatMap(sessionId -> findById(sessionId));
     }
 
     public Mono<User> findById(String sessionId) {
