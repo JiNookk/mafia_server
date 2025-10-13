@@ -25,4 +25,7 @@ public interface RoomR2dbcRepository extends R2dbcRepository<RoomEntity, Long> {
     @Modifying
     @Query("UPDATE rooms SET status = :status WHERE room_id = :roomId")
     Mono<Integer> updateStatus(String roomId, String status);
+
+    @Query("SELECT * FROM rooms WHERE room_id = :roomId FOR UPDATE")
+    Mono<RoomEntity> findByRoomIdForUpdate(String roomId);
 }

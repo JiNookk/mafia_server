@@ -4,6 +4,7 @@ import com.jingwook.mafia_server.dtos.*;
 import com.jingwook.mafia_server.services.RoomService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,5 +30,16 @@ public class RoomController {
     public Mono<RoomDetailResponse> create(
             @Valid @RequestBody CreateRoomDto body) {
         return roomService.create(body);
+    }
+
+    @GetMapping("/{roomId}")
+    public Mono<RoomDetailResponse> getDetail(@PathVariable String roomId) {
+        return roomService.getDetail(roomId);
+    }
+
+    @PostMapping("/{roomId}/join")
+    public Mono<RoomDetailResponse> join(@PathVariable String roomId,
+            @Valid @RequestBody JoinRoomDto body) {
+        return roomService.joinRoom(body);
     }
 }
