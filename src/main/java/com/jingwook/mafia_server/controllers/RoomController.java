@@ -42,4 +42,10 @@ public class RoomController {
             @Valid @RequestBody JoinRoomDto body) {
         return roomService.joinRoom(body);
     }
+
+    @PostMapping("/{roomId}/leave")
+    public Mono<Void> leave(@PathVariable String roomId,
+            @Valid @RequestBody LeaveRoomDto body) {
+        return roomService.leaveRoom(roomId, body.getUserId());
+    }
 }

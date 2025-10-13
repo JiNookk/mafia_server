@@ -190,7 +190,8 @@ public class RoomService {
                                                                 HttpStatus.NOT_FOUND,
                                                                 "Room not found")))
                                                 .flatMap(roomEntity -> validateRoomStatus(roomEntity)
-                                                                .then(validateRoomCapacity(roomId, roomEntity.getMaxPlayers()))
+                                                                .then(validateRoomCapacity(roomId,
+                                                                                roomEntity.getMaxPlayers()))
                                                                 .then(createAndSaveRoomMember(roomId, user.getId()))
                                                                 .then(buildRoomDetailResponse(roomEntity))));
         }
@@ -212,5 +213,42 @@ public class RoomService {
                                                                                 .toList(),
                                                                 members.size(),
                                                                 roomEntity.getMaxPlayers())));
+        }
+
+        private Mono<Void> validateUserInRoom(String roomId, String userId) {
+                return roomMemberR2dbcRepository.existsByRoomIdAndUserId(roomId, userId)
+                                .flatMap(exists -> {
+                                        if (!exists) {
+                                                return Mono.error(new ResponseStatusException(
+                                                                HttpStatus.BAD_REQUEST,
+                                                                "User is not in this room"));
+                                        }
+                                        return Mono.empty();
+                                });
+        }
+
+        private Mono<Void> removeRoomMember(String roomId, String userId) {
+                return roomMemberR2dbcRepository.deleteByRoomIdAndUserId(roomId, userId);
+        }
+
+        private Mono<Void> deleteRoomIfEmpty(Long roomEntityId, String roomId) {
+                return roomMemberR2dbcRepository.countByRoomId(roomId)
+                                .flatMap(remainingMembers -> {
+                                        if (remainingMembers == 0) {
+                                                return roomR2dbcRepository.deleteById(roomEntityId).then();
+                                        }
+                                        return Mono.empty();
+                                });
+        }
+
+        @Transactional
+        public Mono<Void> leaveRoom(String roomId, String userId) {
+                return roomR2dbcRepository.findByRoomIdForUpdate(roomId)
+                                .switchIfEmpty(Mono.error(new ResponseStatusException(
+                                                HttpStatus.NOT_FOUND,
+                                                "Room not found")))
+                                .flatMap(roomEntity -> validateUserInRoom(roomId, userId)
+                                                .then(removeRoomMember(roomId, userId))
+                                                .then(deleteRoomIfEmpty(roomEntity.getId(), roomId)));
         }
 }
