@@ -11,5 +11,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class RoomMemberResponse {
     private String userId;
+    private String nickname;
     private ParticipatingRole role;
 }

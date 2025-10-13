@@ -92,41 +92,60 @@ public class RoomService {
                                                                                 HttpStatus.BAD_REQUEST,
                                                                                 "User is already in a room"))
                                                                 : Mono.just(user)))
-                                .flatMap(user -> {
-                                        String roomId = UuidCreator.getTimeOrderedEpoch().toString();
-                                        LocalDateTime now = LocalDateTime.now();
+                                .flatMap(user -> createRoomWithHost(roomName, user));
+        }
 
-                                        // Room Entity 생성 및 저장
-                                        RoomEntity roomEntity = RoomEntity.builder()
-                                                        .roomId(roomId)
-                                                        .name(roomName)
-                                                        .maxPlayers(MAX_PLAYERS)
-                                                        .status(RoomStatus.AVAILABLE.toString())
-                                                        .hostUserId(user.getId())
-                                                        .createdAt(now)
-                                                        .updatedAt(now)
-                                                        .build();
+        private Mono<RoomDetailResponse> createRoomWithHost(String roomName,
+                        com.jingwook.mafia_server.domains.User user) {
+                String roomId = UuidCreator.getTimeOrderedEpoch().toString();
+                LocalDateTime now = LocalDateTime.now();
 
-                                        // Room Member Entity 생성 및 저장
-                                        RoomMemberEntity roomMemberEntity = RoomMemberEntity.builder()
-                                                        .roomId(roomId)
-                                                        .userId(user.getId())
-                                                        .role(ParticipatingRole.HOST.toString())
-                                                        .joinedAt(now)
-                                                        .build();
+                RoomEntity roomEntity = buildRoomEntity(roomId, roomName, user.getId(), now);
+                RoomMemberEntity roomMemberEntity = buildHostMemberEntity(roomId, user.getId(), now);
 
-                                        return Mono.zip(
-                                                        roomR2dbcRepository.save(roomEntity),
-                                                        roomMemberR2dbcRepository.save(roomMemberEntity))
-                                                        .then(Mono.just(new RoomDetailResponse(
-                                                                        roomId,
-                                                                        roomName,
-                                                                        List.of(new RoomMemberResponse(
-                                                                                        user.getId(),
-                                                                                        ParticipatingRole.HOST)),
-                                                                        1,
-                                                                        MAX_PLAYERS)));
-                                });
+                return saveRoomAndMember(roomEntity, roomMemberEntity)
+                                .then(Mono.just(buildInitialRoomResponse(roomId, roomName, user)));
+        }
+
+        private RoomEntity buildRoomEntity(String roomId, String roomName, String userId, LocalDateTime now) {
+                return RoomEntity.builder()
+                                .roomId(roomId)
+                                .name(roomName)
+                                .maxPlayers(MAX_PLAYERS)
+                                .status(RoomStatus.AVAILABLE.toString())
+                                .hostUserId(userId)
+                                .createdAt(now)
+                                .updatedAt(now)
+                                .build();
+        }
+
+        private RoomMemberEntity buildHostMemberEntity(String roomId, String userId, LocalDateTime now) {
+                return RoomMemberEntity.builder()
+                                .roomId(roomId)
+                                .userId(userId)
+                                .role(ParticipatingRole.HOST.toString())
+                                .joinedAt(now)
+                                .build();
+        }
+
+        private Mono<Void> saveRoomAndMember(RoomEntity roomEntity, RoomMemberEntity roomMemberEntity) {
+                return Mono.zip(
+                                roomR2dbcRepository.save(roomEntity),
+                                roomMemberR2dbcRepository.save(roomMemberEntity))
+                                .then();
+        }
+
+        private RoomDetailResponse buildInitialRoomResponse(String roomId, String roomName,
+                        com.jingwook.mafia_server.domains.User user) {
+                return new RoomDetailResponse(
+                                roomId,
+                                roomName,
+                                List.of(new RoomMemberResponse(
+                                                user.getId(),
+                                                user.getNickname(),
+                                                ParticipatingRole.HOST)),
+                                1,
+                                MAX_PLAYERS);
         }
 
         private Mono<Void> validateRoomStatus(RoomEntity roomEntity) {
@@ -160,15 +179,16 @@ public class RoomService {
 
         private Mono<RoomDetailResponse> buildRoomDetailResponse(RoomEntity roomEntity) {
                 return roomMemberR2dbcRepository.findByRoomId(roomEntity.getRoomId())
+                                .flatMap(member -> userRepository.findById(member.getUserId())
+                                                .map(user -> new RoomMemberResponse(
+                                                                member.getUserId(),
+                                                                user.getNickname(),
+                                                                member.getRoleAsEnum())))
                                 .collectList()
                                 .map(members -> new RoomDetailResponse(
                                                 roomEntity.getRoomId(),
                                                 roomEntity.getName(),
-                                                members.stream()
-                                                                .map(m -> new RoomMemberResponse(
-                                                                                m.getUserId(),
-                                                                                m.getRoleAsEnum()))
-                                                                .toList(),
+                                                members,
                                                 members.size(),
                                                 roomEntity.getMaxPlayers()));
         }
@@ -201,18 +221,7 @@ public class RoomService {
                                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                                                 HttpStatus.NOT_FOUND,
                                                 "Room not found")))
-                                .flatMap(roomEntity -> roomMemberR2dbcRepository.findByRoomId(roomId)
-                                                .collectList()
-                                                .map(members -> new RoomDetailResponse(
-                                                                roomEntity.getRoomId(),
-                                                                roomEntity.getName(),
-                                                                members.stream()
-                                                                                .map(m -> new RoomMemberResponse(
-                                                                                                m.getUserId(),
-                                                                                                m.getRoleAsEnum()))
-                                                                                .toList(),
-                                                                members.size(),
-                                                                roomEntity.getMaxPlayers())));
+                                .flatMap(this::buildRoomDetailResponse);
         }
 
         private Mono<Void> validateUserInRoom(String roomId, String userId) {
