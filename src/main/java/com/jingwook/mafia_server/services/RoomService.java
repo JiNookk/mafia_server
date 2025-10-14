@@ -23,11 +23,13 @@ import com.jingwook.mafia_server.entities.RoomEntity;
 import com.jingwook.mafia_server.entities.RoomMemberEntity;
 import com.jingwook.mafia_server.enums.ParticipatingRole;
 import com.jingwook.mafia_server.enums.RoomStatus;
+import com.jingwook.mafia_server.events.RoomUpdateEvent;
 import com.jingwook.mafia_server.exceptions.GameAlreadyStartedException;
 import com.jingwook.mafia_server.exceptions.RoomFullException;
 import com.jingwook.mafia_server.repositories.RoomMemberR2dbcRepository;
 import com.jingwook.mafia_server.repositories.RoomR2dbcRepository;
 import com.jingwook.mafia_server.repositories.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -37,13 +39,16 @@ public class RoomService {
         private final RoomR2dbcRepository roomR2dbcRepository;
         private final RoomMemberR2dbcRepository roomMemberR2dbcRepository;
         private final UserRepository userRepository;
+        private final ApplicationEventPublisher eventPublisher;
 
         public RoomService(RoomR2dbcRepository roomR2dbcRepository,
                         RoomMemberR2dbcRepository roomMemberR2dbcRepository,
-                        UserRepository userRepository) {
+                        UserRepository userRepository,
+                        ApplicationEventPublisher eventPublisher) {
                 this.roomR2dbcRepository = roomR2dbcRepository;
                 this.roomMemberR2dbcRepository = roomMemberR2dbcRepository;
                 this.userRepository = userRepository;
+                this.eventPublisher = eventPublisher;
         }
 
         public Mono<OffsetPaginationDto<RoomListResponse>> getList(GetRoomListQueryDto query) {
@@ -104,7 +109,9 @@ public class RoomService {
                 RoomMemberEntity roomMemberEntity = buildHostMemberEntity(roomId, user.getId(), now);
 
                 return saveRoomAndMember(roomEntity, roomMemberEntity)
-                                .then(Mono.just(buildInitialRoomResponse(roomId, roomName, user)));
+                                .then(Mono.just(buildInitialRoomResponse(roomId, roomName, user)))
+                                .doOnSuccess(response ->
+                                        eventPublisher.publishEvent(new RoomUpdateEvent(roomId, response)));
         }
 
         private RoomEntity buildRoomEntity(String roomId, String roomName, String userId, LocalDateTime now) {
@@ -213,7 +220,9 @@ public class RoomService {
                                                                 .then(validateRoomCapacity(roomId,
                                                                                 roomEntity.getMaxPlayers()))
                                                                 .then(createAndSaveRoomMember(roomId, user.getId()))
-                                                                .then(buildRoomDetailResponse(roomEntity))));
+                                                                .then(buildRoomDetailResponse(roomEntity))
+                                                                .doOnSuccess(response ->
+                                                                        eventPublisher.publishEvent(new RoomUpdateEvent(roomId, response)))));
         }
 
         public Mono<RoomDetailResponse> getDetail(String roomId) {
@@ -240,16 +249,6 @@ public class RoomService {
                 return roomMemberR2dbcRepository.deleteByRoomIdAndUserId(roomId, userId);
         }
 
-        private Mono<Void> deleteRoomIfEmpty(Long roomEntityId, String roomId) {
-                return roomMemberR2dbcRepository.countByRoomId(roomId)
-                                .flatMap(remainingMembers -> {
-                                        if (remainingMembers == 0) {
-                                                return roomR2dbcRepository.deleteById(roomEntityId).then();
-                                        }
-                                        return Mono.empty();
-                                });
-        }
-
         @Transactional
         public Mono<Void> leaveRoom(String roomId, String userId) {
                 return roomR2dbcRepository.findByRoomIdForUpdate(roomId)
@@ -258,6 +257,17 @@ public class RoomService {
                                                 "Room not found")))
                                 .flatMap(roomEntity -> validateUserInRoom(roomId, userId)
                                                 .then(removeRoomMember(roomId, userId))
-                                                .then(deleteRoomIfEmpty(roomEntity.getId(), roomId)));
+                                                .then(roomMemberR2dbcRepository.countByRoomId(roomId))
+                                                .flatMap(remainingMembers -> {
+                                                        if (remainingMembers == 0) {
+                                                                return roomR2dbcRepository.deleteById(roomEntity.getId())
+                                                                                .then(Mono.empty());
+                                                        }
+                                                        // 방이 남아있으면 업데이트 이벤트 발행
+                                                        return getDetail(roomId)
+                                                                .doOnSuccess(detail ->
+                                                                        eventPublisher.publishEvent(new RoomUpdateEvent(roomId, detail)))
+                                                                .then();
+                                                }));
         }
 }
