@@ -1,5 +1,6 @@
 package com.jingwook.mafia_server.entities;
 
+import com.jingwook.mafia_server.enums.GameRole;
 import com.jingwook.mafia_server.enums.ParticipatingRole;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -29,6 +30,12 @@ public class RoomMemberEntity {
     @Column("role")
     private String role;
 
+    @Column("game_role")
+    private String gameRole;
+
+    @Column("is_alive")
+    private Boolean isAlive;
+
     @Column("joined_at")
     private LocalDateTime joinedAt;
 
@@ -38,5 +45,13 @@ public class RoomMemberEntity {
 
     public void setRoleFromEnum(ParticipatingRole participatingRole) {
         this.role = participatingRole.toString();
+    }
+
+    public GameRole getGameRoleAsEnum() {
+        return gameRole != null ? GameRole.valueOf(this.gameRole) : null;
+    }
+
+    public void setGameRoleFromEnum(GameRole gameRole) {
+        this.gameRole = gameRole != null ? gameRole.toString() : null;
     }
 }
