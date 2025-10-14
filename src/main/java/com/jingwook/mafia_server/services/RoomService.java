@@ -29,6 +29,8 @@ import com.jingwook.mafia_server.exceptions.RoomFullException;
 import com.jingwook.mafia_server.repositories.RoomMemberR2dbcRepository;
 import com.jingwook.mafia_server.repositories.RoomR2dbcRepository;
 import com.jingwook.mafia_server.repositories.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 
 import reactor.core.publisher.Flux;
@@ -36,6 +38,8 @@ import reactor.core.publisher.Mono;
 
 @Service
 public class RoomService {
+        private static final Logger log = LoggerFactory.getLogger(RoomService.class);
+
         private final RoomR2dbcRepository roomR2dbcRepository;
         private final RoomMemberR2dbcRepository roomMemberR2dbcRepository;
         private final UserRepository userRepository;
@@ -261,13 +265,16 @@ public class RoomService {
                                                 .flatMap(remainingMembers -> {
                                                         if (remainingMembers == 0) {
                                                                 return roomR2dbcRepository.deleteById(roomEntity.getId())
-                                                                                .then(Mono.empty());
+                                                                                .then();
                                                         }
                                                         // 방이 남아있으면 업데이트 이벤트 발행
-                                                        return getDetail(roomId)
-                                                                .doOnSuccess(detail ->
-                                                                        eventPublisher.publishEvent(new RoomUpdateEvent(roomId, detail)))
-                                                                .then();
+                                                        log.info("leaveRoom: Publishing room update event for roomId: {}", roomId);
+                                                        return buildRoomDetailResponse(roomEntity)
+                                                                .flatMap(detail -> {
+                                                                        log.info("leaveRoom: Event publishing with {} members", detail.getMembers().size());
+                                                                        eventPublisher.publishEvent(new RoomUpdateEvent(roomId, detail));
+                                                                        return Mono.empty();
+                                                                });
                                                 }));
         }
 }

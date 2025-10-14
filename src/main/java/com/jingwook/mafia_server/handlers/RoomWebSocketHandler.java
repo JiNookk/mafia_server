@@ -134,23 +134,30 @@ public class RoomWebSocketHandler implements WebSocketHandler {
         return null;
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @EventListener
     @Async
     public void handleRoomUpdate(RoomUpdateEvent event) {
         String roomId = event.getRoomId();
+        log.info("WebSocketHandler: Received room update event for roomId: {}", roomId);
+
         Sinks.Many<String> sink = roomSinks.get(roomId);
 
         if (sink != null) {
+            log.info("WebSocketHandler: Found sink for roomId: {}", roomId);
             try {
                 String json = createRoomUpdateMessage(event.getRoomDetail());
                 Sinks.EmitResult result = sink.tryEmitNext(json);
 
                 if (result.isFailure()) {
                     log.warn("Failed to emit room update for room {}: {}", roomId, result);
+                } else {
+                    log.info("WebSocketHandler: Successfully emitted update for roomId: {}", roomId);
                 }
             } catch (Exception e) {
                 log.error("Failed to serialize room update for room: {}", roomId, e);
             }
+        } else {
+            log.warn("WebSocketHandler: No sink found for roomId: {}", roomId);
         }
     }
 }
