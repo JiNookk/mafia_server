@@ -9,17 +9,15 @@ import java.time.LocalDateTime;
 
 @Getter
 public class User {
-    @NotNull(message = "User has no sessionId")
-    @NotBlank(message = "User has no sessionId")
-    private final String sessionId;
+    private final String id;
     @NotNull(message = "User has no nickname")
     @NotBlank(message = "User has no nickname")
     private final String nickname;
     @NotNull(message = "User has no joinedAt")
     private final LocalDateTime joinedAt;
 
-    public User(@Valid String sessionId, @Valid String nickname, @Valid LocalDateTime joinedAt) {
-        this.sessionId = sessionId;
+    public User(String id, @Valid String nickname, @Valid LocalDateTime joinedAt) {
+        this.id = id;
         this.nickname = nickname;
         this.joinedAt = joinedAt;
     }

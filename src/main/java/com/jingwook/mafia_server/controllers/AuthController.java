@@ -30,11 +30,11 @@ public class AuthController {
     }
 
     @PostMapping("/current")
-    public Mono<ResponseEntity<String>> checkSession(
+    public Mono<ResponseEntity<SessionResponseDto>> checkSession(
             @Valid @RequestBody SessionRequestDto body) {
 
-        return authService.checkSession(body.getSessionId())
-                .map(exists -> exists ? ResponseEntity.ok(HttpStatus.OK.toString())
-                        : ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
+        return authService.getCurrentUser(body.getUserId())
+                .map(ResponseEntity::ok)
+                .switchIfEmpty(Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()));
     }
 }

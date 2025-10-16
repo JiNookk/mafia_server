@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class RoomMemberResponse {
-    private String playerId;
+    private String userId;
+    private String nickname;
     private ParticipatingRole role;
 }
