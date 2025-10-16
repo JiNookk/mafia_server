@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.domain.Persistable;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
@@ -17,9 +19,13 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table("game_actions")
-public class GameActionEntity {
+public class GameActionEntity implements Persistable<String> {
     @Id
     private String id;
+
+    @Transient
+    @Builder.Default
+    private boolean isNew = true;
 
     @Column("game_id")
     private String gameId;
@@ -56,5 +62,14 @@ public class GameActionEntity {
 
     public void setTypeFromEnum(ActionType actionType) {
         this.type = actionType.toString();
+    }
+
+    @Override
+    public boolean isNew() {
+        return this.isNew;
+    }
+
+    public void markAsNotNew() {
+        this.isNew = false;
     }
 }
