@@ -18,10 +18,7 @@ import java.time.LocalDateTime;
 @Table("rooms")
 public class RoomEntity {
     @Id
-    private Long id;
-
-    @Column("room_id")
-    private String roomId;
+    private String id;
 
     @Column("name")
     private String name;

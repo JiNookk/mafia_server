@@ -10,9 +10,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Repository
-public interface RoomR2dbcRepository extends R2dbcRepository<RoomEntity, Long> {
-
-    Mono<RoomEntity> findByRoomId(String roomId);
+public interface RoomR2dbcRepository extends R2dbcRepository<RoomEntity, String> {
 
     @Query("SELECT * FROM rooms ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
     Flux<RoomEntity> findAllWithPagination(long offset, long limit);
@@ -20,12 +18,10 @@ public interface RoomR2dbcRepository extends R2dbcRepository<RoomEntity, Long> {
     @Query("SELECT COUNT(*) FROM rooms")
     Mono<Long> countAll();
 
-    Mono<Boolean> existsByRoomId(String roomId);
-
     @Modifying
-    @Query("UPDATE rooms SET status = :status WHERE room_id = :roomId")
-    Mono<Integer> updateStatus(String roomId, String status);
+    @Query("UPDATE rooms SET status = :status WHERE id = :id")
+    Mono<Integer> updateStatus(String id, String status);
 
-    @Query("SELECT * FROM rooms WHERE room_id = :roomId FOR UPDATE")
-    Mono<RoomEntity> findByRoomIdForUpdate(String roomId);
+    @Query("SELECT * FROM rooms WHERE id = :id FOR UPDATE")
+    Mono<RoomEntity> findByIdForUpdate(String id);
 }

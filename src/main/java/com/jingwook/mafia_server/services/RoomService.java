@@ -70,7 +70,7 @@ public class RoomService {
         }
 
         private Mono<RoomListResponse> convertToRoomListResponse(RoomEntity roomEntity) {
-                return roomMemberR2dbcRepository.findByRoomId(roomEntity.getRoomId())
+                return roomMemberR2dbcRepository.findByRoomId(roomEntity.getId())
                                 .map(this::convertToRoomMemberDomain)
                                 .collectList()
                                 .map(members -> buildRoomListResponse(roomEntity, members));
@@ -86,7 +86,7 @@ public class RoomService {
 
         private RoomListResponse buildRoomListResponse(RoomEntity roomEntity, List<com.jingwook.mafia_server.domains.RoomMember> members) {
                 com.jingwook.mafia_server.domains.Room room = new com.jingwook.mafia_server.domains.Room(
-                                roomEntity.getRoomId(),
+                                roomEntity.getId(),
                                 roomEntity.getName(),
                                 roomEntity.getMaxPlayers(),
                                 roomEntity.getStatusAsEnum(),
@@ -96,7 +96,7 @@ public class RoomService {
                 );
 
                 return new RoomListResponse(
-                                roomEntity.getRoomId(),
+                                roomEntity.getId(),
                                 roomEntity.getName(),
                                 room.getCurrentPlayerCount(),
                                 roomEntity.getMaxPlayers(),
@@ -151,7 +151,7 @@ public class RoomService {
 
         private RoomEntity buildRoomEntity(String roomId, String roomName, String userId, LocalDateTime now) {
                 return RoomEntity.builder()
-                                .roomId(roomId)
+                                .id(roomId)
                                 .name(roomName)
                                 .maxPlayers(MAX_PLAYERS)
                                 .status(RoomStatus.AVAILABLE.toString())
@@ -162,7 +162,9 @@ public class RoomService {
         }
 
         private RoomMemberEntity buildHostMemberEntity(String roomId, String userId, LocalDateTime now) {
+                String memberId = UuidCreator.getTimeOrderedEpoch().toString();
                 return RoomMemberEntity.builder()
+                                .id(memberId)
                                 .roomId(roomId)
                                 .userId(userId)
                                 .role(ParticipatingRole.HOST.toString())
@@ -208,8 +210,10 @@ public class RoomService {
         }
 
         private Mono<RoomMemberEntity> createAndSaveRoomMember(String roomId, String userId) {
+                String memberId = UuidCreator.getTimeOrderedEpoch().toString();
                 LocalDateTime now = LocalDateTime.now();
                 RoomMemberEntity roomMemberEntity = RoomMemberEntity.builder()
+                                .id(memberId)
                                 .roomId(roomId)
                                 .userId(userId)
                                 .role(ParticipatingRole.PARTICIPANT.toString())
@@ -220,7 +224,7 @@ public class RoomService {
         }
 
         private Mono<RoomDetailResponse> buildRoomDetailResponse(RoomEntity roomEntity) {
-                return roomMemberR2dbcRepository.findByRoomId(roomEntity.getRoomId())
+                return roomMemberR2dbcRepository.findByRoomId(roomEntity.getId())
                                 .flatMap(member -> userRepository.findById(member.getUserId())
                                                 .map(user -> new RoomMemberResponse(
                                                                 member.getUserId(),
@@ -228,7 +232,7 @@ public class RoomService {
                                                                 member.getRoleAsEnum())))
                                 .collectList()
                                 .map(members -> new RoomDetailResponse(
-                                                roomEntity.getRoomId(),
+                                                roomEntity.getId(),
                                                 roomEntity.getName(),
                                                 members,
                                                 members.size(),
@@ -247,7 +251,7 @@ public class RoomService {
                                                                                 HttpStatus.BAD_REQUEST,
                                                                                 "User is already in a room"))
                                                                 : Mono.just(user)))
-                                .flatMap(user -> roomR2dbcRepository.findByRoomIdForUpdate(roomId)
+                                .flatMap(user -> roomR2dbcRepository.findByIdForUpdate(roomId)
                                                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                                                                 HttpStatus.NOT_FOUND,
                                                                 "Room not found")))
@@ -261,7 +265,7 @@ public class RoomService {
         }
 
         public Mono<RoomDetailResponse> getDetail(String roomId) {
-                return roomR2dbcRepository.findByRoomId(roomId)
+                return roomR2dbcRepository.findById(roomId)
                                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                                                 HttpStatus.NOT_FOUND,
                                                 "Room not found")))
@@ -329,7 +333,7 @@ public class RoomService {
 
         @Transactional
         public Mono<Void> leaveRoom(String roomId, String userId) {
-                return roomR2dbcRepository.findByRoomIdForUpdate(roomId)
+                return roomR2dbcRepository.findByIdForUpdate(roomId)
                                 .switchIfEmpty(Mono.error(new ResponseStatusException(
                                                 HttpStatus.NOT_FOUND,
                                                 "Room not found")))
