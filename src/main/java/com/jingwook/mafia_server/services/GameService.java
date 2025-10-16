@@ -9,7 +9,9 @@ import com.jingwook.mafia_server.entities.RoomMemberEntity;
 import com.jingwook.mafia_server.enums.ActionType;
 import com.jingwook.mafia_server.enums.GamePhase;
 import com.jingwook.mafia_server.enums.PlayerRole;
+import com.jingwook.mafia_server.events.GameStartedEvent;
 import com.jingwook.mafia_server.repositories.*;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,7 @@ public class GameService {
     private final GameActionR2dbcRepository gameActionRepository;
     private final RoomMemberR2dbcRepository roomMemberRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     // 페이즈별 제한 시간 (초)
     private static final int NIGHT_DURATION = 60;
@@ -42,12 +45,14 @@ public class GameService {
             GamePlayerR2dbcRepository gamePlayerRepository,
             GameActionR2dbcRepository gameActionRepository,
             RoomMemberR2dbcRepository roomMemberRepository,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            ApplicationEventPublisher eventPublisher) {
         this.gameRepository = gameRepository;
         this.gamePlayerRepository = gamePlayerRepository;
         this.gameActionRepository = gameActionRepository;
         this.roomMemberRepository = roomMemberRepository;
         this.userRepository = userRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -55,7 +60,11 @@ public class GameService {
         return checkNoActiveGame(roomId)
                 .then(createNewGame(roomId))
                 .flatMap(game -> initializeGamePlayers(game, roomId))
-                .map(this::buildGameStateResponse);
+                .map(this::buildGameStateResponse)
+                .doOnSuccess(gameState -> {
+                    // 게임 시작 이벤트 발행
+                    eventPublisher.publishEvent(new GameStartedEvent(roomId, gameState.getGameId()));
+                });
     }
 
     private Mono<Void> checkNoActiveGame(String roomId) {
@@ -101,40 +110,51 @@ public class GameService {
     }
 
     private Mono<Void> assignRolesAndSavePlayers(String gameId, List<RoomMemberEntity> members) {
-        // 8명 검증
+        return validatePlayerCount(members)
+                .then(Mono.defer(() -> {
+                    List<PlayerRole> shuffledRoles = createAndShuffleRoles();
+                    List<GamePlayerEntity> players = createGamePlayers(gameId, members, shuffledRoles);
+                    return gamePlayerRepository.saveAll(players).then();
+                }));
+    }
+
+    private Mono<Void> validatePlayerCount(List<RoomMemberEntity> members) {
         if (members.size() != 8) {
             return Mono.error(new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "게임은 정확히 8명이 필요합니다. 현재: " + members.size() + "명"));
         }
+        return Mono.empty();
+    }
 
-        // 8명 기준 직업 배정: 마피아 2, 의사 1, 경찰 1, 시민 4
+    private List<PlayerRole> createAndShuffleRoles() {
         List<PlayerRole> roles = Arrays.asList(
                 PlayerRole.MAFIA, PlayerRole.MAFIA,
                 PlayerRole.DOCTOR,
                 PlayerRole.POLICE,
                 PlayerRole.CITIZEN, PlayerRole.CITIZEN, PlayerRole.CITIZEN, PlayerRole.CITIZEN
         );
-
-        // 랜덤 섞기
         Collections.shuffle(roles);
+        return roles;
+    }
 
+    private List<GamePlayerEntity> createGamePlayers(String gameId, List<RoomMemberEntity> members, List<PlayerRole> roles) {
         List<GamePlayerEntity> players = new ArrayList<>();
         for (int i = 0; i < members.size(); i++) {
-            RoomMemberEntity member = members.get(i);
-            String playerId = UuidCreator.getTimeOrderedEpoch().toString();
-            GamePlayerEntity player = GamePlayerEntity.builder()
-                    .id(playerId)
-                    .gameId(gameId)
-                    .userId(member.getUserId())
-                    .role(roles.get(i).toString())
-                    .isAlive(true)
-                    .position(i + 1)
-                    .build();
-            players.add(player);
+            players.add(createGamePlayer(gameId, members.get(i), roles.get(i), i + 1));
         }
+        return players;
+    }
 
-        return gamePlayerRepository.saveAll(players).then();
+    private GamePlayerEntity createGamePlayer(String gameId, RoomMemberEntity member, PlayerRole role, int position) {
+        return GamePlayerEntity.builder()
+                .id(UuidCreator.getTimeOrderedEpoch().toString())
+                .gameId(gameId)
+                .userId(member.getUserId())
+                .role(role.toString())
+                .isAlive(true)
+                .position(position)
+                .build();
     }
 
     public Mono<GameStateResponse> getGameState(String gameId) {
@@ -176,48 +196,61 @@ public class GameService {
     public Mono<Void> registerAction(String gameId, RegisterActionDto dto) {
         return gameRepository.findById(gameId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "게임을 찾을 수 없습니다")))
-                .flatMap(game -> {
-                    // 게임 종료 체크
-                    if (game.isFinished()) {
-                        return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "종료된 게임입니다"));
-                    }
-
-                    return gamePlayerRepository.findByGameIdAndUserId(gameId, dto.getActorUserId())
-                            .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "게임 참가자가 아닙니다")))
-                            .flatMap(player -> {
-                                // enum 검증
-                                ActionType actionType;
-                                try {
-                                    actionType = ActionType.valueOf(dto.getType());
-                                } catch (IllegalArgumentException e) {
-                                    return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "잘못된 행동 타입입니다"));
-                                }
-
-                                // 권한 검증
-                                if (!validateActionPermission(player, game, actionType)) {
-                                    return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "해당 행동을 할 수 없습니다"));
-                                }
-
-                                // 기존 행동 삭제 후 새로 등록 (변경 가능하도록)
-                                return gameActionRepository.deleteByGameIdAndActorUserIdAndDayCountAndType(
-                                        gameId, dto.getActorUserId(), game.getDayCount(), dto.getType())
-                                        .then(Mono.defer(() -> {
-                                            String actionId = UuidCreator.getTimeOrderedEpoch().toString();
-                                            GameActionEntity action = GameActionEntity.builder()
-                                                    .id(actionId)
-                                                    .gameId(gameId)
-                                                    .dayCount(game.getDayCount())
-                                                    .phase(game.getCurrentPhase())
-                                                    .type(dto.getType())
-                                                    .actorUserId(dto.getActorUserId())
-                                                    .targetUserId(dto.getTargetUserId())
-                                                    .createdAt(LocalDateTime.now())
-                                                    .build();
-                                            return gameActionRepository.save(action);
-                                        }));
-                            });
-                })
+                .flatMap(game -> validateGameNotFinished(game)
+                        .then(findAndValidatePlayer(gameId, dto.getActorUserId()))
+                        .flatMap(player -> validateAndSaveAction(game, player, dto)))
                 .then();
+    }
+
+    private Mono<Void> validateGameNotFinished(GameEntity game) {
+        if (game.isFinished()) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "종료된 게임입니다"));
+        }
+        return Mono.empty();
+    }
+
+    private Mono<GamePlayerEntity> findAndValidatePlayer(String gameId, String userId) {
+        return gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "게임 참가자가 아닙니다")));
+    }
+
+    private Mono<Void> validateAndSaveAction(GameEntity game, GamePlayerEntity player, RegisterActionDto dto) {
+        return parseActionType(dto.getType())
+                .flatMap(actionType -> {
+                    if (!validateActionPermission(player, game, actionType)) {
+                        return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "해당 행동을 할 수 없습니다"));
+                    }
+                    return replaceAction(game, dto);
+                });
+    }
+
+    private Mono<ActionType> parseActionType(String typeString) {
+        try {
+            return Mono.just(ActionType.valueOf(typeString));
+        } catch (IllegalArgumentException e) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "잘못된 행동 타입입니다"));
+        }
+    }
+
+    private Mono<Void> replaceAction(GameEntity game, RegisterActionDto dto) {
+        return gameActionRepository.deleteByGameIdAndActorUserIdAndDayCountAndType(
+                        game.getId(), dto.getActorUserId(), game.getDayCount(), dto.getType())
+                .then(Mono.defer(() -> createAndSaveAction(game, dto)));
+    }
+
+    private Mono<Void> createAndSaveAction(GameEntity game, RegisterActionDto dto) {
+        String actionId = UuidCreator.getTimeOrderedEpoch().toString();
+        GameActionEntity action = GameActionEntity.builder()
+                .id(actionId)
+                .gameId(game.getId())
+                .dayCount(game.getDayCount())
+                .phase(game.getCurrentPhase())
+                .type(dto.getType())
+                .actorUserId(dto.getActorUserId())
+                .targetUserId(dto.getTargetUserId())
+                .createdAt(LocalDateTime.now())
+                .build();
+        return gameActionRepository.save(action).then();
     }
 
     private boolean validateActionPermission(GamePlayerEntity player, GameEntity game, ActionType actionType) {
