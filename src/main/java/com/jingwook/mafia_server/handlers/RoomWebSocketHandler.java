@@ -146,7 +146,8 @@ public class RoomWebSocketHandler implements WebSocketHandler {
     @EventListener
     @Async
     public void handleChatEvent(ChatEvent event) {
-        String roomId = event.getRoomId();
+        // ChatEvent.contextId는 대기실 채팅의 경우 roomId
+        String roomId = event.getContextId();
         log.info("WebSocketHandler: Received chat event for roomId: {}", roomId);
 
         broadcastToRoom(roomId, WebSocketMessageType.CHAT, event.getChatMessage());

@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class ChatMessageDto {
     private Long id;
-    private String roomId;
+    private String contextId; // roomId 또는 gameId
     private String userId;
     private String nickname;
     private ChatType chatType;

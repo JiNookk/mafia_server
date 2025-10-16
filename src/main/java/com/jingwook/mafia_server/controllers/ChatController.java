@@ -30,8 +30,8 @@ public class ChatController {
     public Mono<List<ChatMessageDto>> getChatHistory(
             @PathVariable String roomId,
             @RequestParam String userId,
-            @RequestParam ChatType chatType,
             @RequestParam(defaultValue = "50") int limit) {
-        return chatService.getChatHistory(roomId, userId, chatType, limit);
+        // 대기실 채팅만 조회
+        return chatService.getChatHistory(roomId, userId, ChatType.WAITING_ROOM, limit);
     }
 }
