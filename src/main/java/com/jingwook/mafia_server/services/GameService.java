@@ -1,5 +1,6 @@
 package com.jingwook.mafia_server.services;
 
+import com.github.f4b6a3.uuid.UuidCreator;
 import com.jingwook.mafia_server.dtos.*;
 import com.jingwook.mafia_server.entities.GameActionEntity;
 import com.jingwook.mafia_server.entities.GameEntity;
@@ -50,23 +51,25 @@ public class GameService {
     }
 
     @Transactional
-    public Mono<GameStateResponse> startGame(Long roomId) {
+    public Mono<GameStateResponse> startGame(String roomId) {
         return checkNoActiveGame(roomId)
                 .then(createNewGame(roomId))
                 .flatMap(game -> initializeGamePlayers(game, roomId))
                 .map(this::buildGameStateResponse);
     }
 
-    private Mono<Void> checkNoActiveGame(Long roomId) {
+    private Mono<Void> checkNoActiveGame(String roomId) {
         return gameRepository.findActiveGameByRoomId(roomId)
                 .flatMap(existingGame -> Mono.<Void>error(
                         new ResponseStatusException(HttpStatus.BAD_REQUEST, "게임이 이미 진행 중입니다")))
                 .then();
     }
 
-    private Mono<GameEntity> createNewGame(Long roomId) {
+    private Mono<GameEntity> createNewGame(String roomId) {
+        String gameId = UuidCreator.getTimeOrderedEpoch().toString();
         LocalDateTime now = LocalDateTime.now();
         GameEntity game = GameEntity.builder()
+                .id(gameId)
                 .roomId(roomId)
                 .currentPhase(GamePhase.NIGHT.toString())
                 .dayCount(1)
@@ -77,8 +80,8 @@ public class GameService {
         return gameRepository.save(game);
     }
 
-    private Mono<GameEntity> initializeGamePlayers(GameEntity game, Long roomId) {
-        return roomMemberRepository.findByRoomId(roomId.toString())
+    private Mono<GameEntity> initializeGamePlayers(GameEntity game, String roomId) {
+        return roomMemberRepository.findByRoomId(roomId)
                 .collectList()
                 .flatMap(members -> assignRolesAndSavePlayers(game.getId(), members))
                 .thenReturn(game);
@@ -97,7 +100,7 @@ public class GameService {
                 .build();
     }
 
-    private Mono<Void> assignRolesAndSavePlayers(Long gameId, List<RoomMemberEntity> members) {
+    private Mono<Void> assignRolesAndSavePlayers(String gameId, List<RoomMemberEntity> members) {
         // 8명 검증
         if (members.size() != 8) {
             return Mono.error(new ResponseStatusException(
@@ -119,9 +122,11 @@ public class GameService {
         List<GamePlayerEntity> players = new ArrayList<>();
         for (int i = 0; i < members.size(); i++) {
             RoomMemberEntity member = members.get(i);
+            String playerId = UuidCreator.getTimeOrderedEpoch().toString();
             GamePlayerEntity player = GamePlayerEntity.builder()
+                    .id(playerId)
                     .gameId(gameId)
-                    .userId(Long.parseLong(member.getUserId()))
+                    .userId(member.getUserId())
                     .role(roles.get(i).toString())
                     .isAlive(true)
                     .position(i + 1)
@@ -132,13 +137,13 @@ public class GameService {
         return gamePlayerRepository.saveAll(players).then();
     }
 
-    public Mono<GameStateResponse> getGameState(Long gameId) {
+    public Mono<GameStateResponse> getGameState(String gameId) {
         return gameRepository.findById(gameId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "게임을 찾을 수 없습니다")))
                 .map(this::buildGameStateResponse);
     }
 
-    public Mono<MyRoleResponse> getMyRole(Long gameId, Long userId) {
+    public Mono<MyRoleResponse> getMyRole(String gameId, String userId) {
         return gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "게임 참가자를 찾을 수 없습니다")))
                 .map(player -> MyRoleResponse.builder()
@@ -148,9 +153,9 @@ public class GameService {
                         .build());
     }
 
-    public Mono<GamePlayersResponse> getPlayers(Long gameId) {
+    public Mono<GamePlayersResponse> getPlayers(String gameId) {
         return gamePlayerRepository.findByGameId(gameId)
-                .flatMap(player -> userRepository.findById(player.getUserId().toString())
+                .flatMap(player -> userRepository.findById(player.getUserId())
                         .switchIfEmpty(Mono.error(new ResponseStatusException(
                                 HttpStatus.NOT_FOUND,
                                 "유저를 찾을 수 없습니다: " + player.getUserId())))
@@ -168,7 +173,7 @@ public class GameService {
     }
 
     @Transactional
-    public Mono<Void> registerAction(Long gameId, RegisterActionDto dto) {
+    public Mono<Void> registerAction(String gameId, RegisterActionDto dto) {
         return gameRepository.findById(gameId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "게임을 찾을 수 없습니다")))
                 .flatMap(game -> {
@@ -197,7 +202,9 @@ public class GameService {
                                 return gameActionRepository.deleteByGameIdAndActorUserIdAndDayCountAndType(
                                         gameId, dto.getActorUserId(), game.getDayCount(), dto.getType())
                                         .then(Mono.defer(() -> {
+                                            String actionId = UuidCreator.getTimeOrderedEpoch().toString();
                                             GameActionEntity action = GameActionEntity.builder()
+                                                    .id(actionId)
                                                     .gameId(gameId)
                                                     .dayCount(game.getDayCount())
                                                     .phase(game.getCurrentPhase())
@@ -229,7 +236,7 @@ public class GameService {
         };
     }
 
-    public Mono<VoteStatusResponse> getVoteStatus(Long gameId, Integer dayCount) {
+    public Mono<VoteStatusResponse> getVoteStatus(String gameId, Integer dayCount) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
                         gameId, dayCount, ActionType.VOTE.toString())
                 .collectList()
@@ -241,7 +248,7 @@ public class GameService {
                                     .build())
                             .toList();
 
-                    Map<Long, Long> voteCount = votes.stream()
+                    Map<String, Long> voteCount = votes.stream()
                             .collect(Collectors.groupingBy(
                                     GameActionEntity::getTargetUserId,
                                     Collectors.counting()));
@@ -254,7 +261,7 @@ public class GameService {
     }
 
     @Transactional
-    public Mono<NextPhaseResponse> nextPhase(Long gameId) {
+    public Mono<NextPhaseResponse> nextPhase(String gameId) {
         return gameRepository.findById(gameId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "게임을 찾을 수 없습니다")))
                 .flatMap(game -> processPhaseResult(game)
@@ -298,33 +305,33 @@ public class GameService {
     }
 
     private Mono<NextPhaseResponse.PhaseResult> processNightPhase(GameEntity game) {
-        Mono<Long> mafiaTargetMono = getMafiaKillTarget(game);
-        Mono<Long> doctorTargetMono = getDoctorHealTarget(game);
+        Mono<String> mafiaTargetMono = getMafiaKillTarget(game);
+        Mono<String> doctorTargetMono = getDoctorHealTarget(game);
 
         return Mono.zip(mafiaTargetMono, doctorTargetMono)
                 .flatMap(tuple -> executeNightKill(game, tuple.getT1(), tuple.getT2()));
     }
 
-    private Mono<Long> getMafiaKillTarget(GameEntity game) {
+    private Mono<String> getMafiaKillTarget(GameEntity game) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
                         game.getId(), game.getDayCount(), ActionType.MAFIA_KILL.toString())
                 .collectList()
                 .map(this::selectTargetFromVotes);
     }
 
-    private Mono<Long> getDoctorHealTarget(GameEntity game) {
+    private Mono<String> getDoctorHealTarget(GameEntity game) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
                         game.getId(), game.getDayCount(), ActionType.DOCTOR_HEAL.toString())
                 .next()
                 .map(GameActionEntity::getTargetUserId)
-                .defaultIfEmpty(-1L);
+                .defaultIfEmpty("");
     }
 
-    private Mono<NextPhaseResponse.PhaseResult> executeNightKill(GameEntity game, Long mafiaTarget, Long doctorTarget) {
-        List<Long> deaths = new ArrayList<>();
+    private Mono<NextPhaseResponse.PhaseResult> executeNightKill(GameEntity game, String mafiaTarget, String doctorTarget) {
+        List<String> deaths = new ArrayList<>();
 
         // 마피아가 타겟을 선택하지 않았거나, 의사가 살린 경우 사망 없음
-        if (mafiaTarget == null || mafiaTarget.equals(doctorTarget)) {
+        if (mafiaTarget == null || mafiaTarget.isEmpty() || mafiaTarget.equals(doctorTarget)) {
             return Mono.just(NextPhaseResponse.PhaseResult.builder()
                     .deaths(deaths)
                     .build());
@@ -348,7 +355,7 @@ public class GameService {
     private Mono<NextPhaseResponse.PhaseResult> processResultPhase(GameEntity game) {
         return getExecutedUserIdFromVotes(game)
                 .flatMap(executedUserId -> {
-                    if (executedUserId == null) {
+                    if (executedUserId == null || executedUserId.isEmpty()) {
                         return Mono.just(NextPhaseResponse.PhaseResult.builder().build());
                     }
 
@@ -359,19 +366,19 @@ public class GameService {
                 });
     }
 
-    private Mono<Long> getExecutedUserIdFromVotes(GameEntity game) {
+    private Mono<String> getExecutedUserIdFromVotes(GameEntity game) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
                         game.getId(), game.getDayCount(), ActionType.VOTE.toString())
                 .collectList()
                 .map(this::selectTargetFromVotes);
     }
 
-    private Long selectTargetFromVotes(List<GameActionEntity> actions) {
+    private String selectTargetFromVotes(List<GameActionEntity> actions) {
         if (actions.isEmpty()) {
             return null;
         }
 
-        Map<Long, Long> voteCount = actions.stream()
+        Map<String, Long> voteCount = actions.stream()
                 .collect(Collectors.groupingBy(
                         GameActionEntity::getTargetUserId,
                         Collectors.counting()));
@@ -380,7 +387,7 @@ public class GameService {
                 .max(Long::compareTo)
                 .orElse(0L);
 
-        List<Long> topVoted = voteCount.entrySet().stream()
+        List<String> topVoted = voteCount.entrySet().stream()
                 .filter(entry -> entry.getValue() == maxVotes)
                 .map(Map.Entry::getKey)
                 .toList();
@@ -389,7 +396,7 @@ public class GameService {
         return topVoted.size() == 1 ? topVoted.get(0) : null;
     }
 
-    private Mono<Void> killPlayer(Long gameId, Long userId) {
+    private Mono<Void> killPlayer(String gameId, String userId) {
         return gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
                 .flatMap(player -> {
                     player.setIsAlive(false);
@@ -399,7 +406,7 @@ public class GameService {
                 .then();
     }
 
-    private Mono<String> checkGameEnd(Long gameId) {
+    private Mono<String> checkGameEnd(String gameId) {
         Mono<Long> aliveMafiaMono = gamePlayerRepository.countByGameIdAndIsAliveAndRole(
                 gameId, true, PlayerRole.MAFIA.toString());
 

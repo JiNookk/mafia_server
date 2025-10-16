@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 public class GameStateResponse {
-    private Long gameId;
+    private String gameId;
     private String currentPhase;
     private Integer dayCount;
     private LocalDateTime phaseStartTime;

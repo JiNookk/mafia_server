@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("")
 public class GameController {
     private final GameService gameService;
 
@@ -20,7 +20,7 @@ public class GameController {
      * POST /api/rooms/{roomId}/games/start
      */
     @PostMapping("/rooms/{roomId}/games/start")
-    public Mono<GameStateResponse> startGame(@PathVariable Long roomId) {
+    public Mono<GameStateResponse> startGame(@PathVariable String roomId) {
         return gameService.startGame(roomId);
     }
 
@@ -29,7 +29,7 @@ public class GameController {
      * GET /api/games/{gameId}
      */
     @GetMapping("/games/{gameId}")
-    public Mono<GameStateResponse> getGameState(@PathVariable Long gameId) {
+    public Mono<GameStateResponse> getGameState(@PathVariable String gameId) {
         return gameService.getGameState(gameId);
     }
 
@@ -39,8 +39,8 @@ public class GameController {
      */
     @GetMapping("/games/{gameId}/my-role")
     public Mono<MyRoleResponse> getMyRole(
-            @PathVariable Long gameId,
-            @RequestParam Long userId) {
+            @PathVariable String gameId,
+            @RequestParam String userId) {
         return gameService.getMyRole(gameId, userId);
     }
 
@@ -49,7 +49,7 @@ public class GameController {
      * GET /api/games/{gameId}/players
      */
     @GetMapping("/games/{gameId}/players")
-    public Mono<GamePlayersResponse> getPlayers(@PathVariable Long gameId) {
+    public Mono<GamePlayersResponse> getPlayers(@PathVariable String gameId) {
         return gameService.getPlayers(gameId);
     }
 
@@ -59,7 +59,7 @@ public class GameController {
      */
     @PostMapping("/games/{gameId}/actions")
     public Mono<Void> registerAction(
-            @PathVariable Long gameId,
+            @PathVariable String gameId,
             @Valid @RequestBody RegisterActionDto body) {
         return gameService.registerAction(gameId, body);
     }
@@ -70,7 +70,7 @@ public class GameController {
      */
     @GetMapping("/games/{gameId}/votes")
     public Mono<VoteStatusResponse> getVoteStatus(
-            @PathVariable Long gameId,
+            @PathVariable String gameId,
             @RequestParam Integer dayCount) {
         return gameService.getVoteStatus(gameId, dayCount);
     }
@@ -80,7 +80,7 @@ public class GameController {
      * POST /api/games/{gameId}/next-phase
      */
     @PostMapping("/games/{gameId}/next-phase")
-    public Mono<NextPhaseResponse> nextPhase(@PathVariable Long gameId) {
+    public Mono<NextPhaseResponse> nextPhase(@PathVariable String gameId) {
         return gameService.nextPhase(gameId);
     }
 }

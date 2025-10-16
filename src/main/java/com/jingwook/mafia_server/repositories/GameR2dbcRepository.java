@@ -7,10 +7,10 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
 @Repository
-public interface GameR2dbcRepository extends R2dbcRepository<GameEntity, Long> {
+public interface GameR2dbcRepository extends R2dbcRepository<GameEntity, String> {
 
-    Mono<GameEntity> findByRoomId(Long roomId);
+    Mono<GameEntity> findByRoomId(String roomId);
 
     @Query("SELECT * FROM games WHERE room_id = :roomId AND finished_at IS NULL")
-    Mono<GameEntity> findActiveGameByRoomId(Long roomId);
+    Mono<GameEntity> findActiveGameByRoomId(String roomId);
 }

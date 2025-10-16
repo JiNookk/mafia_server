@@ -19,10 +19,10 @@ import java.time.LocalDateTime;
 @Table("game_actions")
 public class GameActionEntity {
     @Id
-    private Long id;
+    private String id;
 
     @Column("game_id")
-    private Long gameId;
+    private String gameId;
 
     @Column("day_count")
     private Integer dayCount;
@@ -34,10 +34,10 @@ public class GameActionEntity {
     private String type;
 
     @Column("actor_user_id")
-    private Long actorUserId;
+    private String actorUserId;
 
     @Column("target_user_id")
-    private Long targetUserId;
+    private String targetUserId;
 
     @Column("created_at")
     private LocalDateTime createdAt;

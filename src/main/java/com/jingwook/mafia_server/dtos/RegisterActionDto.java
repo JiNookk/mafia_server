@@ -13,7 +13,7 @@ public class RegisterActionDto {
     private String type;
 
     @NotNull(message = "대상 유저 ID는 필수입니다")
-    private Long targetUserId;
+    private String targetUserId;
 
-    private Long actorUserId;  // 서버에서 세션으로 채움
+    private String actorUserId;  // 서버에서 세션으로 채움
 }

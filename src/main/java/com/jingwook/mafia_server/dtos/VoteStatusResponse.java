@@ -14,14 +14,14 @@ import java.util.Map;
 @NoArgsConstructor
 public class VoteStatusResponse {
     private List<VoteInfo> votes;
-    private Map<Long, Long> voteCount;
+    private Map<String, Long> voteCount;
 
     @Data
     @Builder
     @AllArgsConstructor
     @NoArgsConstructor
     public static class VoteInfo {
-        private Long voterUserId;
-        private Long targetUserId;
+        private String voterUserId;
+        private String targetUserId;
     }
 }

@@ -24,8 +24,8 @@ public class NextPhaseResponse {
     @AllArgsConstructor
     @NoArgsConstructor
     public static class PhaseResult {
-        private List<Long> deaths;
-        private Long executedUserId;
+        private List<String> deaths;
+        private String executedUserId;
         private String winnerTeam;
     }
 }

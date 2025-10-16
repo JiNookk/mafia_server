@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @NoArgsConstructor
 public class GamePlayerResponse {
-    private Long userId;
+    private String userId;
     private String username;
     private Integer position;
     private Boolean isAlive;
