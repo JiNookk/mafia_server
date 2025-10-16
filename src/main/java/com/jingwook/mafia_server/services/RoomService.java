@@ -64,13 +64,34 @@ public class RoomService {
 
                 Flux<RoomListResponse> roomListFlux = roomR2dbcRepository
                                 .findAllWithPagination(offset, limit)
-                                .flatMap(roomEntity -> roomMemberR2dbcRepository.countByRoomId(roomEntity.getRoomId())
-                                                .map(currentPlayers -> new RoomListResponse(
+                                .flatMap(roomEntity ->
+                                        roomMemberR2dbcRepository.findByRoomId(roomEntity.getRoomId())
+                                                .map(memberEntity -> new com.jingwook.mafia_server.domains.RoomMember(
+                                                        memberEntity.getUserId(),
+                                                        memberEntity.getRoomId(),
+                                                        memberEntity.getRoleAsEnum()
+                                                ))
+                                                .collectList()
+                                                .map(members -> {
+                                                        // 도메인 객체를 생성하여 실제 상태를 계산
+                                                        com.jingwook.mafia_server.domains.Room room =
+                                                                new com.jingwook.mafia_server.domains.Room(
+                                                                        roomEntity.getRoomId(),
+                                                                        roomEntity.getName(),
+                                                                        roomEntity.getMaxPlayers(),
+                                                                        roomEntity.getStatusAsEnum(),
+                                                                        roomEntity.getHostUserId(),
+                                                                        roomEntity.getCreatedAt(),
+                                                                        members
+                                                                );
+
+                                                        return new RoomListResponse(
                                                                 roomEntity.getRoomId(),
                                                                 roomEntity.getName(),
-                                                                currentPlayers.intValue(),
+                                                                room.getCurrentPlayerCount(),
                                                                 roomEntity.getMaxPlayers(),
-                                                                roomEntity.getStatusAsEnum())));
+                                                                room.calculateActualStatus());
+                                                }));
 
                 return Mono.zip(roomListFlux.collectList(), totalCountMono)
                                 .map(tuple -> {
