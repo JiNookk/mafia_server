@@ -61,49 +61,59 @@ public class RoomService {
                 long offset = page * limit;
 
                 Mono<Long> totalCountMono = roomR2dbcRepository.countAll();
-
                 Flux<RoomListResponse> roomListFlux = roomR2dbcRepository
                                 .findAllWithPagination(offset, limit)
-                                .flatMap(roomEntity ->
-                                        roomMemberR2dbcRepository.findByRoomId(roomEntity.getRoomId())
-                                                .map(memberEntity -> new com.jingwook.mafia_server.domains.RoomMember(
-                                                        memberEntity.getUserId(),
-                                                        memberEntity.getRoomId(),
-                                                        memberEntity.getRoleAsEnum()
-                                                ))
-                                                .collectList()
-                                                .map(members -> {
-                                                        // 도메인 객체를 생성하여 실제 상태를 계산
-                                                        com.jingwook.mafia_server.domains.Room room =
-                                                                new com.jingwook.mafia_server.domains.Room(
-                                                                        roomEntity.getRoomId(),
-                                                                        roomEntity.getName(),
-                                                                        roomEntity.getMaxPlayers(),
-                                                                        roomEntity.getStatusAsEnum(),
-                                                                        roomEntity.getHostUserId(),
-                                                                        roomEntity.getCreatedAt(),
-                                                                        members
-                                                                );
-
-                                                        return new RoomListResponse(
-                                                                roomEntity.getRoomId(),
-                                                                roomEntity.getName(),
-                                                                room.getCurrentPlayerCount(),
-                                                                roomEntity.getMaxPlayers(),
-                                                                room.calculateActualStatus());
-                                                }));
+                                .flatMap(this::convertToRoomListResponse);
 
                 return Mono.zip(roomListFlux.collectList(), totalCountMono)
-                                .map(tuple -> {
-                                        List<RoomListResponse> rooms = tuple.getT1();
-                                        Long totalCount = tuple.getT2();
-                                        int totalPage = (int) Math.ceil((double) totalCount / limit);
+                                .map(tuple -> buildPaginationDto(tuple, page, limit));
+        }
 
-                                        OffsetPaginationMetadata meta = new OffsetPaginationMetadata((int) page,
-                                                        totalPage, (int) limit);
+        private Mono<RoomListResponse> convertToRoomListResponse(RoomEntity roomEntity) {
+                return roomMemberR2dbcRepository.findByRoomId(roomEntity.getRoomId())
+                                .map(this::convertToRoomMemberDomain)
+                                .collectList()
+                                .map(members -> buildRoomListResponse(roomEntity, members));
+        }
 
-                                        return new OffsetPaginationDto<>(rooms, meta);
-                                });
+        private com.jingwook.mafia_server.domains.RoomMember convertToRoomMemberDomain(RoomMemberEntity memberEntity) {
+                return new com.jingwook.mafia_server.domains.RoomMember(
+                                memberEntity.getUserId(),
+                                memberEntity.getRoomId(),
+                                memberEntity.getRoleAsEnum()
+                );
+        }
+
+        private RoomListResponse buildRoomListResponse(RoomEntity roomEntity, List<com.jingwook.mafia_server.domains.RoomMember> members) {
+                com.jingwook.mafia_server.domains.Room room = new com.jingwook.mafia_server.domains.Room(
+                                roomEntity.getRoomId(),
+                                roomEntity.getName(),
+                                roomEntity.getMaxPlayers(),
+                                roomEntity.getStatusAsEnum(),
+                                roomEntity.getHostUserId(),
+                                roomEntity.getCreatedAt(),
+                                members
+                );
+
+                return new RoomListResponse(
+                                roomEntity.getRoomId(),
+                                roomEntity.getName(),
+                                room.getCurrentPlayerCount(),
+                                roomEntity.getMaxPlayers(),
+                                room.calculateActualStatus()
+                );
+        }
+
+        private OffsetPaginationDto<RoomListResponse> buildPaginationDto(
+                        reactor.util.function.Tuple2<List<RoomListResponse>, Long> tuple,
+                        long page,
+                        long limit) {
+                List<RoomListResponse> rooms = tuple.getT1();
+                Long totalCount = tuple.getT2();
+                int totalPage = (int) Math.ceil((double) totalCount / limit);
+
+                OffsetPaginationMetadata meta = new OffsetPaginationMetadata((int) page, totalPage, (int) limit);
+                return new OffsetPaginationDto<>(rooms, meta);
         }
 
         private Mono<Boolean> checkUserInRoom(String userId) {
@@ -274,6 +284,49 @@ public class RoomService {
                 return roomMemberR2dbcRepository.deleteByRoomIdAndUserId(roomId, userId);
         }
 
+        private Mono<Void> transferHostIfNeeded(String roomId, String leavingUserId, RoomEntity roomEntity) {
+                if (!roomEntity.getHostUserId().equals(leavingUserId)) {
+                        return Mono.empty();
+                }
+
+                return roomMemberR2dbcRepository.findByRoomId(roomId)
+                                .sort((m1, m2) -> m1.getJoinedAt().compareTo(m2.getJoinedAt()))
+                                .next()
+                                .switchIfEmpty(Mono.fromRunnable(() ->
+                                        log.warn("No remaining members to transfer host for room {}", roomId)))
+                                .flatMap(newHost -> {
+                                        log.info("Transferring host from {} to {} in room {}",
+                                                leavingUserId, newHost.getUserId(), roomId);
+
+                                        newHost.setRoleFromEnum(ParticipatingRole.HOST);
+                                        roomEntity.setHostUserId(newHost.getUserId());
+
+                                        return Mono.zip(
+                                                roomMemberR2dbcRepository.save(newHost),
+                                                roomR2dbcRepository.save(roomEntity)
+                                        ).then();
+                                });
+        }
+
+        private Mono<Void> buildAndPublishRoomUpdateEvent(String roomId, RoomEntity roomEntity) {
+                log.info("Publishing room update event for roomId: {}", roomId);
+                return buildRoomDetailResponse(roomEntity)
+                                .doOnSuccess(detail -> {
+                                        log.info("Event publishing with {} members", detail.getMembers().size());
+                                        eventPublisher.publishEvent(new RoomUpdateEvent(roomId, detail));
+                                })
+                                .then();
+        }
+
+        private Mono<Void> handleRoomAfterMemberLeave(String roomId, String userId, RoomEntity roomEntity, Long remainingMembers) {
+                if (remainingMembers == 0) {
+                        return roomR2dbcRepository.deleteById(roomEntity.getId()).then();
+                }
+
+                return transferHostIfNeeded(roomId, userId, roomEntity)
+                                .then(Mono.defer(() -> buildAndPublishRoomUpdateEvent(roomId, roomEntity)));
+        }
+
         @Transactional
         public Mono<Void> leaveRoom(String roomId, String userId) {
                 return roomR2dbcRepository.findByRoomIdForUpdate(roomId)
@@ -283,19 +336,7 @@ public class RoomService {
                                 .flatMap(roomEntity -> validateUserInRoom(roomId, userId)
                                                 .then(removeRoomMember(roomId, userId))
                                                 .then(roomMemberR2dbcRepository.countByRoomId(roomId))
-                                                .flatMap(remainingMembers -> {
-                                                        if (remainingMembers == 0) {
-                                                                return roomR2dbcRepository.deleteById(roomEntity.getId())
-                                                                                .then();
-                                                        }
-                                                        // 방이 남아있으면 업데이트 이벤트 발행
-                                                        log.info("leaveRoom: Publishing room update event for roomId: {}", roomId);
-                                                        return buildRoomDetailResponse(roomEntity)
-                                                                .flatMap(detail -> {
-                                                                        log.info("leaveRoom: Event publishing with {} members", detail.getMembers().size());
-                                                                        eventPublisher.publishEvent(new RoomUpdateEvent(roomId, detail));
-                                                                        return Mono.empty();
-                                                                });
-                                                }));
+                                                .flatMap(remainingMembers ->
+                                                        handleRoomAfterMemberLeave(roomId, userId, roomEntity, remainingMembers)));
         }
 }
