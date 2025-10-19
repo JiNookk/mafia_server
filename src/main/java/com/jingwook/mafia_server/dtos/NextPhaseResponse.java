@@ -29,5 +29,6 @@ public class NextPhaseResponse {
         private List<String> deaths;
         private String executedUserId;
         private Team winnerTeam;
+        private Boolean wasSavedByDoctor; // 의사 구출 성공 여부 (NIGHT -> DAY 전환 시)
     }
 }

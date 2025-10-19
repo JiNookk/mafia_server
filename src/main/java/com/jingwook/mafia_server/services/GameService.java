@@ -410,18 +410,30 @@ public class GameService {
         List<String> deaths = new ArrayList<>();
 
         // 도메인 로직: 의사가 마피아 타겟을 살렸는지 판단
-        if (Game.isSavedByDoctor(mafiaTarget, doctorTarget)) {
+        boolean savedByDoctor = Game.isSavedByDoctor(mafiaTarget, doctorTarget);
+
+        if (savedByDoctor) {
+            // 의사가 구출 성공
             return Mono.just(NextPhaseResponse.PhaseResult.builder()
                     .deaths(deaths)
+                    .wasSavedByDoctor(true)
                     .build());
         }
 
         // 마피아 타겟 사망 처리
-        deaths.add(mafiaTarget);
-        return killPlayer(game.getId(), mafiaTarget)
-                .thenReturn(NextPhaseResponse.PhaseResult.builder()
-                        .deaths(deaths)
-                        .build());
+        if (mafiaTarget != null && !mafiaTarget.isEmpty()) {
+            deaths.add(mafiaTarget);
+            return killPlayer(game.getId(), mafiaTarget)
+                    .thenReturn(NextPhaseResponse.PhaseResult.builder()
+                            .deaths(deaths)
+                            .wasSavedByDoctor(false)
+                            .build());
+        }
+
+        // 마피아가 아무도 공격하지 않음
+        return Mono.just(NextPhaseResponse.PhaseResult.builder()
+                .deaths(deaths)
+                .build());
     }
 
     private Mono<NextPhaseResponse.PhaseResult> processVotePhase(GameEntity game) {
