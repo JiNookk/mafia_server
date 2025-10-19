@@ -7,9 +7,12 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Getter
 public class Game {
@@ -184,5 +187,88 @@ public class Game {
         );
         java.util.Collections.shuffle(roles);
         return roles;
+    }
+
+    /**
+     * 현재 페이즈의 남은 시간 계산 (초)
+     */
+    public long calculateRemainingSeconds() {
+        if (phaseStartTime == null || phaseDurationSeconds == null) {
+            return 0L;
+        }
+
+        LocalDateTime endTime = phaseStartTime.plusSeconds(phaseDurationSeconds);
+        long remaining = Duration.between(LocalDateTime.now(), endTime).getSeconds();
+        return Math.max(0, remaining);
+    }
+
+    /**
+     * 투표 결과에서 대상을 선택
+     *
+     * @param targetUserIds 투표 대상 유저 ID 리스트
+     * @param allowTieBreak 동점일 때 첫 번째 선택 여부 (true: 마피아 투표, false: 일반 투표)
+     */
+    public static String selectTargetFromVotes(List<String> targetUserIds, boolean allowTieBreak) {
+        if (targetUserIds.isEmpty()) {
+            return "";
+        }
+
+        Map<String, Long> voteCount = targetUserIds.stream()
+                .collect(Collectors.groupingBy(
+                        targetId -> targetId,
+                        Collectors.counting()));
+
+        long maxVotes = voteCount.values().stream()
+                .max(Long::compareTo)
+                .orElse(0L);
+
+        List<String> topVoted = voteCount.entrySet().stream()
+                .filter(entry -> entry.getValue() == maxVotes)
+                .map(Map.Entry::getKey)
+                .toList();
+
+        if (topVoted.isEmpty()) {
+            return "";
+        }
+
+        // 동점 처리: 마피아는 항상 첫 번째 선택, 일반 투표는 동점 시 처형 없음
+        return (allowTieBreak || topVoted.size() == 1) ? topVoted.get(0) : "";
+    }
+
+    /**
+     * 과반 득표 여부를 확인하는 투표 결과 선택
+     *
+     * @param targetUserIds 투표 대상 유저 ID 리스트
+     * @param alivePlayers  생존 플레이어 수
+     */
+    public static String selectTargetFromVotesWithMajority(List<String> targetUserIds, long alivePlayers) {
+        if (targetUserIds.isEmpty()) {
+            return "";
+        }
+
+        Map<String, Long> voteCount = targetUserIds.stream()
+                .collect(Collectors.groupingBy(
+                        targetId -> targetId,
+                        Collectors.counting()));
+
+        long majorityThreshold = (alivePlayers / 2) + 1; // 과반
+
+        // 과반을 얻은 사람 찾기
+        List<String> majorityVoted = voteCount.entrySet().stream()
+                .filter(entry -> entry.getValue() >= majorityThreshold)
+                .map(Map.Entry::getKey)
+                .toList();
+
+        // 과반을 얻은 사람이 없으면 처형 없음
+        if (majorityVoted.isEmpty()) {
+            return "";
+        }
+
+        // 과반을 얻은 사람이 여러 명이면 처형 없음 (이론상 불가능하지만 안전장치)
+        if (majorityVoted.size() > 1) {
+            return "";
+        }
+
+        return majorityVoted.get(0);
     }
 }

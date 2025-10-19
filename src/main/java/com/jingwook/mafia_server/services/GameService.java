@@ -22,10 +22,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -103,13 +101,14 @@ public class GameService {
     }
 
     private GameStateResponse buildGameStateResponse(GameEntity game) {
+        Game domain = game.toDomain();
         return GameStateResponse.builder()
                 .gameId(game.getId())
                 .currentPhase(game.getCurrentPhaseAsEnum())
                 .dayCount(game.getDayCount())
                 .phaseStartTime(game.getPhaseStartTime())
                 .phaseDurationSeconds(game.getPhaseDurationSeconds())
-                .remainingSeconds(calculateRemainingSeconds(game))
+                .remainingSeconds(domain.calculateRemainingSeconds())
                 .winnerTeam(game.getWinnerTeam() != null ? Team.valueOf(game.getWinnerTeam()) : null)
                 .finishedAt(game.getFinishedAt())
                 .build();
@@ -386,79 +385,10 @@ public class GameService {
     private Mono<String> getMafiaKillTarget(GameEntity game) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
                 game.getId(), game.getDayCount(), ActionType.MAFIA_KILL.toString())
+                .map(GameActionEntity::getTargetUserId)
                 .collectList()
-                .map(votes -> selectTargetFromVotes(votes, true))
+                .map(targetUserIds -> Game.selectTargetFromVotes(targetUserIds, true))
                 .defaultIfEmpty("");
-    }
-
-    /**
-     * 투표 결과에서 대상을 선택
-     *
-     * @param actions       투표 액션 리스트
-     * @param allowTieBreak 동점일 때 첫 번째 선택 여부 (true: 마피아 투표, false: 일반 투표)
-     */
-    private String selectTargetFromVotes(List<GameActionEntity> actions, boolean allowTieBreak) {
-        if (actions.isEmpty()) {
-            return "";
-        }
-
-        Map<String, Long> voteCount = actions.stream()
-                .collect(Collectors.groupingBy(
-                        GameActionEntity::getTargetUserId,
-                        Collectors.counting()));
-
-        long maxVotes = voteCount.values().stream()
-                .max(Long::compareTo)
-                .orElse(0L);
-
-        List<String> topVoted = voteCount.entrySet().stream()
-                .filter(entry -> entry.getValue() == maxVotes)
-                .map(Map.Entry::getKey)
-                .toList();
-
-        if (topVoted.isEmpty()) {
-            return "";
-        }
-
-        // 동점 처리: 마피아는 항상 첫 번째 선택, 일반 투표는 동점 시 처형 없음
-        return (allowTieBreak || topVoted.size() == 1) ? topVoted.get(0) : "";
-    }
-
-    /**
-     * 과반 득표 여부를 확인하는 투표 결과 선택
-     *
-     * @param actions      투표 액션 리스트
-     * @param alivePlayers 생존 플레이어 수
-     */
-    private String selectTargetFromVotesWithMajority(List<GameActionEntity> actions, long alivePlayers) {
-        if (actions.isEmpty()) {
-            return "";
-        }
-
-        Map<String, Long> voteCount = actions.stream()
-                .collect(Collectors.groupingBy(
-                        GameActionEntity::getTargetUserId,
-                        Collectors.counting()));
-
-        long majorityThreshold = (alivePlayers / 2) + 1; // 과반
-
-        // 과반을 얻은 사람 찾기
-        List<String> majorityVoted = voteCount.entrySet().stream()
-                .filter(entry -> entry.getValue() >= majorityThreshold)
-                .map(Map.Entry::getKey)
-                .toList();
-
-        // 과반을 얻은 사람이 없으면 처형 없음
-        if (majorityVoted.isEmpty()) {
-            return "";
-        }
-
-        // 과반을 얻은 사람이 여러 명이면 처형 없음 (이론상 불가능하지만 안전장치)
-        if (majorityVoted.size() > 1) {
-            return "";
-        }
-
-        return majorityVoted.get(0);
     }
 
     private Mono<String> getDoctorHealTarget(GameEntity game) {
@@ -513,11 +443,12 @@ public class GameService {
         return Mono.zip(
                 gameActionRepository.findByGameIdAndDayCountAndType(
                         game.getId(), game.getDayCount(), ActionType.VOTE.toString())
+                        .map(GameActionEntity::getTargetUserId)
                         .collectList(),
                 gamePlayerRepository.countByGameIdAndIsAlive(game.getId(), true)).map(tuple -> {
-                    List<GameActionEntity> votes = tuple.getT1();
+                    List<String> targetUserIds = tuple.getT1();
                     long alivePlayers = tuple.getT2();
-                    return selectTargetFromVotesWithMajority(votes, alivePlayers);
+                    return Game.selectTargetFromVotesWithMajority(targetUserIds, alivePlayers);
                 }).defaultIfEmpty("");
     }
 
@@ -579,15 +510,5 @@ public class GameService {
                 GamePhase.VOTE, VOTE_DURATION,
                 GamePhase.DEFENSE, DEFENSE_DURATION,
                 GamePhase.RESULT, RESULT_DURATION);
-    }
-
-    private Long calculateRemainingSeconds(GameEntity game) {
-        if (game.getPhaseStartTime() == null || game.getPhaseDurationSeconds() == null) {
-            return 0L;
-        }
-
-        LocalDateTime endTime = game.getPhaseStartTime().plusSeconds(game.getPhaseDurationSeconds());
-        long remaining = Duration.between(LocalDateTime.now(), endTime).getSeconds();
-        return Math.max(0, remaining);
     }
 }
