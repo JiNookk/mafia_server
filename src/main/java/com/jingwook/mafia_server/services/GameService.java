@@ -48,8 +48,8 @@ public class GameService {
 
     private static final int NIGHT_DURATION = 10;
     private static final int DAY_DURATION = 10;
-    private static final int VOTE_DURATION = 1;
-    private static final int DEFENSE_DURATION = 1;
+    private static final int VOTE_DURATION = 5;
+    private static final int DEFENSE_DURATION = 5;
     private static final int RESULT_DURATION = 1;
 
     public GameService(
@@ -312,9 +312,15 @@ public class GameService {
     }
 
     private Mono<NextPhaseResponse> moveToNextPhase(GameEntity gameEntity, NextPhaseResponse.PhaseResult result) {
+        // VOTE 페이즈에서만 처형 대상자 확인
+        GamePhase currentPhase = gameEntity.getCurrentPhaseAsEnum();
+        boolean hasExecutedTarget = (currentPhase == GamePhase.VOTE)
+                && result.getExecutedUserId() != null
+                && !result.getExecutedUserId().isEmpty();
+
         // 도메인 로직 실행
         Game nextPhaseGame = gameEntity.toDomain()
-                .transitionToNextPhase(getPhaseDurationMap());
+                .transitionToNextPhase(getPhaseDurationMap(), hasExecutedTarget);
 
         // 엔티티 업데이트
         gameEntity.updateFromDomain(nextPhaseGame);
@@ -363,7 +369,7 @@ public class GameService {
 
     /**
      * 투표 결과에서 대상을 선택
-     * 
+     *
      * @param actions       투표 액션 리스트
      * @param allowTieBreak 동점일 때 첫 번째 선택 여부 (true: 마피아 투표, false: 일반 투표)
      */
@@ -392,6 +398,43 @@ public class GameService {
 
         // 동점 처리: 마피아는 항상 첫 번째 선택, 일반 투표는 동점 시 처형 없음
         return (allowTieBreak || topVoted.size() == 1) ? topVoted.get(0) : "";
+    }
+
+    /**
+     * 과반 득표 여부를 확인하는 투표 결과 선택
+     *
+     * @param actions      투표 액션 리스트
+     * @param alivePlayers 생존 플레이어 수
+     */
+    private String selectTargetFromVotesWithMajority(List<GameActionEntity> actions, long alivePlayers) {
+        if (actions.isEmpty()) {
+            return "";
+        }
+
+        Map<String, Long> voteCount = actions.stream()
+                .collect(Collectors.groupingBy(
+                        GameActionEntity::getTargetUserId,
+                        Collectors.counting()));
+
+        long majorityThreshold = (alivePlayers / 2) + 1; // 과반
+
+        // 과반을 얻은 사람 찾기
+        List<String> majorityVoted = voteCount.entrySet().stream()
+                .filter(entry -> entry.getValue() >= majorityThreshold)
+                .map(Map.Entry::getKey)
+                .toList();
+
+        // 과반을 얻은 사람이 없으면 처형 없음
+        if (majorityVoted.isEmpty()) {
+            return "";
+        }
+
+        // 과반을 얻은 사람이 여러 명이면 처형 없음 (이론상 불가능하지만 안전장치)
+        if (majorityVoted.size() > 1) {
+            return "";
+        }
+
+        return majorityVoted.get(0);
     }
 
     private Mono<String> getDoctorHealTarget(GameEntity game) {
@@ -443,11 +486,15 @@ public class GameService {
     }
 
     private Mono<String> getExecutedUserIdFromVotes(GameEntity game) {
-        return gameActionRepository.findByGameIdAndDayCountAndType(
-                game.getId(), game.getDayCount(), ActionType.VOTE.toString())
-                .collectList()
-                .map(votes -> selectTargetFromVotes(votes, false))
-                .defaultIfEmpty("");
+        return Mono.zip(
+                gameActionRepository.findByGameIdAndDayCountAndType(
+                        game.getId(), game.getDayCount(), ActionType.VOTE.toString())
+                        .collectList(),
+                gamePlayerRepository.countByGameIdAndIsAlive(game.getId(), true)).map(tuple -> {
+                    List<GameActionEntity> votes = tuple.getT1();
+                    long alivePlayers = tuple.getT2();
+                    return selectTargetFromVotesWithMajority(votes, alivePlayers);
+                }).defaultIfEmpty("");
     }
 
     private Mono<Void> killPlayer(String gameId, String userId) {

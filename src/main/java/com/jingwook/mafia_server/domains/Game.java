@@ -78,15 +78,16 @@ public class Game {
     /**
      * 다음 페이즈로 전환된 새로운 Game 객체 반환 (불변)
      * @param phaseDurations 각 페이즈별 지속 시간 맵
+     * @param hasExecutedTarget 처형 대상자가 있는지 여부
      * @return 다음 페이즈로 전환된 새 Game 객체
      */
-    public Game transitionToNextPhase(Map<GamePhase, Integer> phaseDurations) {
-        GamePhase nextPhase = getNextPhase(currentPhase);
+    public Game transitionToNextPhase(Map<GamePhase, Integer> phaseDurations, boolean hasExecutedTarget) {
+        GamePhase nextPhase = getNextPhase(currentPhase, hasExecutedTarget);
         Integer nextPhaseDuration = phaseDurations.get(nextPhase);
         LocalDateTime now = LocalDateTime.now();
 
-        // RESULT 페이즈 이후 NIGHT으로 돌아갈 때 날짜 증가
-        int nextDayCount = (currentPhase == GamePhase.RESULT && nextPhase == GamePhase.NIGHT)
+        // NIGHT으로 돌아갈 때 날짜 증가 (RESULT 이후 또는 VOTE에서 처형 없이 직행)
+        int nextDayCount = ((currentPhase == GamePhase.RESULT || currentPhase == GamePhase.VOTE) && nextPhase == GamePhase.NIGHT)
                 ? dayCount + 1
                 : dayCount;
 
@@ -124,12 +125,14 @@ public class Game {
 
     /**
      * 다음 페이즈 계산
+     * @param current 현재 페이즈
+     * @param hasExecutedTarget 처형 대상자가 있는지 여부
      */
-    private GamePhase getNextPhase(GamePhase current) {
+    private GamePhase getNextPhase(GamePhase current, boolean hasExecutedTarget) {
         return switch (current) {
             case NIGHT -> GamePhase.DAY;
             case DAY -> GamePhase.VOTE;
-            case VOTE -> GamePhase.DEFENSE;
+            case VOTE -> hasExecutedTarget ? GamePhase.DEFENSE : GamePhase.NIGHT; // 처형 대상 없으면 바로 NIGHT
             case DEFENSE -> GamePhase.RESULT;
             case RESULT -> GamePhase.NIGHT;
         };
