@@ -65,7 +65,7 @@ public class GamePlayer {
         }
 
         return switch (actionType) {
-            case VOTE -> currentPhase == GamePhase.VOTE;
+            case VOTE -> currentPhase == GamePhase.DAY || currentPhase == GamePhase.VOTE;
             case MAFIA_KILL -> currentPhase == GamePhase.NIGHT && role == PlayerRole.MAFIA;
             case DOCTOR_HEAL -> currentPhase == GamePhase.NIGHT && role == PlayerRole.DOCTOR;
             case POLICE_CHECK -> currentPhase == GamePhase.NIGHT && role == PlayerRole.POLICE;
