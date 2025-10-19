@@ -52,6 +52,9 @@ public class GameEntity implements Persistable<String> {
     @Column("finished_at")
     private LocalDateTime finishedAt;
 
+    @Column("defendant_user_id")
+    private String defendantUserId; // 재판 대상자 (DEFENSE, RESULT 페이즈에서 사용)
+
     public GamePhase getCurrentPhaseAsEnum() {
         return GamePhase.valueOf(this.currentPhase);
     }
@@ -77,7 +80,8 @@ public class GameEntity implements Persistable<String> {
                 this.phaseDurationSeconds,
                 this.winnerTeam != null ? Team.valueOf(this.winnerTeam) : null,
                 this.startedAt,
-                this.finishedAt
+                this.finishedAt,
+                this.defendantUserId
         );
     }
 
@@ -91,6 +95,7 @@ public class GameEntity implements Persistable<String> {
         this.phaseDurationSeconds = domain.getPhaseDurationSeconds();
         this.winnerTeam = domain.getWinnerTeam() != null ? domain.getWinnerTeam().toString() : null;
         this.finishedAt = domain.getFinishedAt();
+        this.defendantUserId = domain.getDefendantUserId();
     }
 
     @Override

@@ -45,11 +45,11 @@ public class GameService {
     // private static final int VOTE_DURATION = 10;
     // private static final int DEFENSE_DURATION = 10;
     // private static final int RESULT_DURATION = 10;
-    private static final int NIGHT_DURATION = 10;
+    private static final int NIGHT_DURATION = 5;
     private static final int DAY_DURATION = 10;
-    private static final int VOTE_DURATION = 5;
-    private static final int DEFENSE_DURATION = 5;
-    private static final int RESULT_DURATION = 5;
+    private static final int VOTE_DURATION = 2;
+    private static final int DEFENSE_DURATION = 2;
+    private static final int RESULT_DURATION = 2;
 
     public GameService(
             GameR2dbcRepository gameRepository,
@@ -118,6 +118,7 @@ public class GameService {
                 .remainingSeconds(domain.calculateRemainingSeconds())
                 .winnerTeam(game.getWinnerTeam() != null ? Team.valueOf(game.getWinnerTeam()) : null)
                 .finishedAt(game.getFinishedAt())
+                .defendantUserId(game.getDefendantUserId())
                 .build();
     }
 
@@ -245,8 +246,11 @@ public class GameService {
     }
 
     private Mono<Void> validateAndSaveAction(GameEntity game, GamePlayerEntity playerEntity, RegisterActionDto dto) {
-        // 도메인 로직으로 권한 검증
-        if (!playerEntity.toDomain().canPerformAction(game.getCurrentPhaseAsEnum(), dto.getType())) {
+        // 도메인 로직으로 권한 검증 (재판 대상자 정보 포함)
+        if (!playerEntity.toDomain().canPerformAction(
+                game.getCurrentPhaseAsEnum(),
+                dto.getType(),
+                game.getDefendantUserId())) {
             return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "해당 행동을 할 수 없습니다"));
         }
         return replaceAction(game, dto);
@@ -339,15 +343,13 @@ public class GameService {
     }
 
     private Mono<NextPhaseResponse> moveToNextPhase(GameEntity gameEntity, NextPhaseResponse.PhaseResult result) {
-        // VOTE 페이즈에서만 처형 대상자 확인
+        // VOTE 페이즈에서 처형 대상자 ID 가져오기
         GamePhase currentPhase = gameEntity.getCurrentPhaseAsEnum();
-        boolean hasExecutedTarget = (currentPhase == GamePhase.VOTE)
-                && result.getExecutedUserId() != null
-                && !result.getExecutedUserId().isEmpty();
+        String executedUserId = (currentPhase == GamePhase.VOTE) ? result.getExecutedUserId() : null;
 
         // 도메인 로직 실행
         Game nextPhaseGame = gameEntity.toDomain()
-                .transitionToNextPhase(getPhaseDurationMap(), hasExecutedTarget);
+                .transitionToNextPhase(getPhaseDurationMap(), executedUserId);
 
         // 엔티티 업데이트
         gameEntity.updateFromDomain(nextPhaseGame);
@@ -430,16 +432,46 @@ public class GameService {
     }
 
     private Mono<NextPhaseResponse.PhaseResult> processResultPhase(GameEntity game) {
-        return getExecutedUserIdFromVotes(game)
-                .flatMap(executedUserId -> {
-                    if (executedUserId == null || executedUserId.isEmpty()) {
+        // 재판 대상자 (VOTE에서 결정된 사람)
+        String defendantUserId = game.getDefendantUserId();
+
+        if (defendantUserId == null || defendantUserId.isEmpty()) {
+            return Mono.just(NextPhaseResponse.PhaseResult.builder().build());
+        }
+
+        // FINAL_VOTE 결과 확인: 과반이 찬성하면 처형
+        return getFinalVoteResult(game, defendantUserId)
+                .flatMap(shouldExecute -> {
+                    if (shouldExecute) {
+                        return killPlayer(game.getId(), defendantUserId)
+                                .thenReturn(NextPhaseResponse.PhaseResult.builder()
+                                        .executedUserId(defendantUserId)
+                                        .build());
+                    } else {
+                        // 살리기로 결정 -> 처형 없음
                         return Mono.just(NextPhaseResponse.PhaseResult.builder().build());
                     }
+                });
+    }
 
-                    return killPlayer(game.getId(), executedUserId)
-                            .thenReturn(NextPhaseResponse.PhaseResult.builder()
-                                    .executedUserId(executedUserId)
-                                    .build());
+    /**
+     * 최종 투표 결과 확인 (과반이 찬성하면 처형)
+     */
+    private Mono<Boolean> getFinalVoteResult(GameEntity game, String defendantUserId) {
+        return Mono.zip(
+                // 찬성 투표 수 (targetUserId가 defendantUserId인 경우)
+                gameActionRepository.findByGameIdAndDayCountAndType(
+                        game.getId(), game.getDayCount(), ActionType.FINAL_VOTE.toString())
+                        .filter(action -> defendantUserId.equals(action.getTargetUserId()))
+                        .count(),
+                // 총 생존자 수 (재판 대상자 제외)
+                gamePlayerRepository.countByGameIdAndIsAlive(game.getId(), true)).map(tuple -> {
+                    long executeVotes = tuple.getT1();
+                    long totalAlive = tuple.getT2();
+                    long eligibleVoters = totalAlive - 1; // 재판 대상자 제외
+                    long majorityThreshold = (eligibleVoters / 2) + 1;
+
+                    return executeVotes >= majorityThreshold;
                 });
     }
 

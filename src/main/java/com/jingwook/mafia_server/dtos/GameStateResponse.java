@@ -22,4 +22,5 @@ public class GameStateResponse {
     private Long remainingSeconds;
     private Team winnerTeam;
     private LocalDateTime finishedAt;
+    private String defendantUserId; // 재판 대상자 (DEFENSE, RESULT 페이즈에서 사용)
 }

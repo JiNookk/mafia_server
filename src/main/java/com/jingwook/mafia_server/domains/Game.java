@@ -39,6 +39,8 @@ public class Game {
 
     private final LocalDateTime finishedAt;
 
+    private final String defendantUserId; // 재판 대상자
+
     public Game(
             @Valid String id,
             @Valid String roomId,
@@ -48,7 +50,8 @@ public class Game {
             Integer phaseDurationSeconds,
             Team winnerTeam,
             @Valid LocalDateTime startedAt,
-            LocalDateTime finishedAt) {
+            LocalDateTime finishedAt,
+            String defendantUserId) {
         this.id = id;
         this.roomId = roomId;
         this.currentPhase = currentPhase;
@@ -58,6 +61,7 @@ public class Game {
         this.winnerTeam = winnerTeam;
         this.startedAt = startedAt;
         this.finishedAt = finishedAt;
+        this.defendantUserId = defendantUserId;
     }
 
     /**
@@ -81,10 +85,11 @@ public class Game {
     /**
      * 다음 페이즈로 전환된 새로운 Game 객체 반환 (불변)
      * @param phaseDurations 각 페이즈별 지속 시간 맵
-     * @param hasExecutedTarget 처형 대상자가 있는지 여부
+     * @param executedUserId 처형 대상자 ID (VOTE 페이즈에서 설정)
      * @return 다음 페이즈로 전환된 새 Game 객체
      */
-    public Game transitionToNextPhase(Map<GamePhase, Integer> phaseDurations, boolean hasExecutedTarget) {
+    public Game transitionToNextPhase(Map<GamePhase, Integer> phaseDurations, String executedUserId) {
+        boolean hasExecutedTarget = executedUserId != null && !executedUserId.isEmpty();
         GamePhase nextPhase = getNextPhase(currentPhase, hasExecutedTarget);
         Integer nextPhaseDuration = phaseDurations.get(nextPhase);
         LocalDateTime now = LocalDateTime.now();
@@ -93,6 +98,11 @@ public class Game {
         int nextDayCount = ((currentPhase == GamePhase.RESULT || currentPhase == GamePhase.VOTE) && nextPhase == GamePhase.NIGHT)
                 ? dayCount + 1
                 : dayCount;
+
+        // 재판 대상자 설정: VOTE -> DEFENSE 전환 시 설정, RESULT -> NIGHT 전환 시 초기화
+        String nextDefendantUserId = (currentPhase == GamePhase.VOTE && hasExecutedTarget)
+                ? executedUserId
+                : ((currentPhase == GamePhase.RESULT && nextPhase == GamePhase.NIGHT) ? null : defendantUserId);
 
         return new Game(
                 id,
@@ -103,7 +113,8 @@ public class Game {
                 nextPhaseDuration,
                 winnerTeam,
                 startedAt,
-                finishedAt
+                finishedAt,
+                nextDefendantUserId
         );
     }
 
@@ -122,7 +133,8 @@ public class Game {
                 phaseDurationSeconds,
                 winner,
                 startedAt,
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                defendantUserId
         );
     }
 
@@ -150,8 +162,8 @@ public class Game {
     public static Optional<Team> determineWinner(long aliveMafia, long aliveCitizens) {
         if (aliveMafia == 0) {
             return Optional.of(Team.CITIZEN); // 시민팀 승리
-        } else if (aliveMafia >= aliveCitizens) {
-            return Optional.of(Team.MAFIA); // 마피아 승리
+        } else if (aliveMafia > aliveCitizens) {
+            return Optional.of(Team.MAFIA); // 마피아 승리 (마피아가 더 많으면)
         }
         return Optional.empty(); // 게임 계속
     }

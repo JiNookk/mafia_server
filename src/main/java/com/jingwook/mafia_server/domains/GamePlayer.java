@@ -56,9 +56,10 @@ public class GamePlayer {
      * 플레이어가 특정 행동을 할 수 있는 권한이 있는지 검증
      * @param currentPhase 현재 게임 페이즈
      * @param actionType 행동 타입
+     * @param defendantUserId 재판 대상자 ID (RESULT 페이즈에서 사용)
      * @return 권한 유무
      */
-    public boolean canPerformAction(GamePhase currentPhase, ActionType actionType) {
+    public boolean canPerformAction(GamePhase currentPhase, ActionType actionType, String defendantUserId) {
         // 죽은 플레이어는 행동할 수 없음
         if (!isAlive) {
             return false;
@@ -69,6 +70,7 @@ public class GamePlayer {
             case MAFIA_KILL -> currentPhase == GamePhase.NIGHT && role == PlayerRole.MAFIA;
             case DOCTOR_HEAL -> currentPhase == GamePhase.NIGHT && role == PlayerRole.DOCTOR;
             case POLICE_CHECK -> currentPhase == GamePhase.NIGHT && role == PlayerRole.POLICE;
+            case FINAL_VOTE -> currentPhase == GamePhase.RESULT && !userId.equals(defendantUserId); // 재판 대상자 제외
         };
     }
 
