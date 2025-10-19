@@ -2,15 +2,15 @@ package com.jingwook.mafia_server.handlers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jingwook.mafia_server.enums.WebSocketMessageType;
-import com.jingwook.mafia_server.events.*;
+import com.jingwook.mafia_server.events.ChatEvent;
+import com.jingwook.mafia_server.events.GameStartedEvent;
+import com.jingwook.mafia_server.events.RoomUpdateEvent;
 import com.jingwook.mafia_server.services.RoomService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
@@ -160,39 +160,6 @@ public class RoomWebSocketHandler implements WebSocketHandler {
         broadcastToRoom(roomId, WebSocketMessageType.GAME_STARTED, Map.of("gameId", event.getGameId()));
     }
 
-    @EventListener
-    @Async
-    public void handlePhaseChangedEvent(PhaseChangedEvent event) {
-        String roomId = event.getRoomId();
-        log.info("WebSocketHandler: Received phase changed event for roomId: {}", roomId);
-
-        broadcastToRoom(roomId, WebSocketMessageType.PHASE_CHANGED, event.getPhaseData());
-    }
-
-    @EventListener
-    @Async
-    public void handlePlayerDiedEvent(PlayerDiedEvent event) {
-        String roomId = event.getRoomId();
-        log.info("WebSocketHandler: Received player died event for roomId: {}", roomId);
-
-        broadcastToRoom(roomId, WebSocketMessageType.PLAYER_DIED, Map.of(
-                "gameId", event.getGameId(),
-                "deadPlayerIds", event.getDeadPlayerIds(),
-                "reason", event.getReason()
-        ));
-    }
-
-    @EventListener
-    @Async
-    public void handleGameEndedEvent(GameEndedEvent event) {
-        String roomId = event.getRoomId();
-        log.info("WebSocketHandler: Received game ended event for roomId: {}", roomId);
-
-        broadcastToRoom(roomId, WebSocketMessageType.GAME_ENDED, Map.of(
-                "gameId", event.getGameId(),
-                "winnerTeam", event.getWinnerTeam()
-        ));
-    }
 
     private void broadcastToRoom(String roomId, WebSocketMessageType type, Object data) {
         Sinks.Many<String> sink = roomSinks.get(roomId);

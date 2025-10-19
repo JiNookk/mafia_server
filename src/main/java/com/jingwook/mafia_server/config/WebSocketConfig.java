@@ -22,9 +22,10 @@ public class WebSocketConfig {
 
         Map<String, WebSocketHandler> map = new HashMap<>();
         map.put("/ws/rooms/*", roomWebSocketHandler);
-        map.put("/ws/games/*/all", gameWebSocketHandler);
-        map.put("/ws/games/*/mafia", gameWebSocketHandler);
-        map.put("/ws/games/*/dead", gameWebSocketHandler);
+        map.put("/ws/games/*/events", gameWebSocketHandler); // 게임 이벤트
+        map.put("/ws/games/*/all", gameWebSocketHandler);     // 게임 채팅 (전체)
+        map.put("/ws/games/*/mafia", gameWebSocketHandler);   // 게임 채팅 (마피아)
+        map.put("/ws/games/*/dead", gameWebSocketHandler);    // 게임 채팅 (사망자)
 
         SimpleUrlHandlerMapping handlerMapping = new SimpleUrlHandlerMapping();
         handlerMapping.setOrder(1);

@@ -22,8 +22,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -38,11 +40,16 @@ public class GameService {
     private final ApplicationEventPublisher eventPublisher;
 
     // 페이즈별 제한 시간 (초)
-    private static final int NIGHT_DURATION = 30;
-    private static final int DAY_DURATION = 30;
-    private static final int VOTE_DURATION = 10;
-    private static final int DEFENSE_DURATION = 10;
-    private static final int RESULT_DURATION = 10;
+    // private static final int NIGHT_DURATION = 30;
+    // private static final int DAY_DURATION = 30;
+    // private static final int VOTE_DURATION = 10;
+    // private static final int DEFENSE_DURATION = 10;
+    // private static final int RESULT_DURATION = 10;
+    private static final int NIGHT_DURATION = 10;
+    private static final int DAY_DURATION = 10;
+    private static final int VOTE_DURATION = 5;
+    private static final int DEFENSE_DURATION = 5;
+    private static final int RESULT_DURATION = 5;
 
     public GameService(
             GameR2dbcRepository gameRepository,
@@ -180,18 +187,15 @@ public class GameService {
 
                     return gameActionRepository.findByGameIdAndActorUserIdAndType(
                             gameId, userId, ActionType.POLICE_CHECK.toString())
-                            .flatMap(action ->
-                                gamePlayerRepository.findByGameIdAndUserId(gameId, action.getTargetUserId())
-                                    .flatMap(targetPlayer ->
-                                        userRepository.findById(targetPlayer.getUserId())
+                            .flatMap(action -> gamePlayerRepository
+                                    .findByGameIdAndUserId(gameId, action.getTargetUserId())
+                                    .flatMap(targetPlayer -> userRepository.findById(targetPlayer.getUserId())
                                             .map(user -> PoliceCheckResultResponse.CheckResult.builder()
                                                     .targetUserId(targetPlayer.getUserId())
                                                     .targetUsername(user.getNickname())
                                                     .targetRole(targetPlayer.getRoleAsEnum())
                                                     .dayCount(action.getDayCount())
-                                                    .build())
-                                    )
-                            )
+                                                    .build())))
                             .collectList()
                             .map(results -> PoliceCheckResultResponse.builder()
                                     .results(results)
