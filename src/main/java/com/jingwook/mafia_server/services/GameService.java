@@ -40,17 +40,11 @@ public class GameService {
     private final ApplicationEventPublisher eventPublisher;
 
     // 페이즈별 제한 시간 (초)
-    // private static final int NIGHT_DURATION = 60;
-    // private static final int DAY_DURATION = 180;
-    // private static final int VOTE_DURATION = 120;
-    // private static final int DEFENSE_DURATION = 60;
-    // private static final int RESULT_DURATION = 30;
-
-    private static final int NIGHT_DURATION = 10;
-    private static final int DAY_DURATION = 10;
-    private static final int VOTE_DURATION = 5;
-    private static final int DEFENSE_DURATION = 5;
-    private static final int RESULT_DURATION = 1;
+    private static final int NIGHT_DURATION = 30;
+    private static final int DAY_DURATION = 30;
+    private static final int VOTE_DURATION = 10;
+    private static final int DEFENSE_DURATION = 10;
+    private static final int RESULT_DURATION = 10;
 
     public GameService(
             GameR2dbcRepository gameRepository,
@@ -174,6 +168,36 @@ public class GameService {
                         .isAlive(player.getIsAlive())
                         .position(player.getPosition())
                         .build());
+    }
+
+    public Mono<PoliceCheckResultResponse> getPoliceCheckResults(String gameId, String userId) {
+        return gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "게임 참가자를 찾을 수 없습니다")))
+                .flatMap(player -> {
+                    // 경찰만 조회 가능
+                    if (player.getRoleAsEnum() != PlayerRole.POLICE) {
+                        return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "경찰만 조회할 수 있습니다"));
+                    }
+
+                    return gameActionRepository.findByGameIdAndActorUserIdAndType(
+                            gameId, userId, ActionType.POLICE_CHECK.toString())
+                            .flatMap(action ->
+                                gamePlayerRepository.findByGameIdAndUserId(gameId, action.getTargetUserId())
+                                    .flatMap(targetPlayer ->
+                                        userRepository.findById(targetPlayer.getUserId())
+                                            .map(user -> PoliceCheckResultResponse.CheckResult.builder()
+                                                    .targetUserId(targetPlayer.getUserId())
+                                                    .targetUsername(user.getNickname())
+                                                    .targetRole(targetPlayer.getRoleAsEnum())
+                                                    .dayCount(action.getDayCount())
+                                                    .build())
+                                    )
+                            )
+                            .collectList()
+                            .map(results -> PoliceCheckResultResponse.builder()
+                                    .results(results)
+                                    .build());
+                });
     }
 
     public Mono<GamePlayersResponse> getPlayers(String gameId) {

@@ -29,4 +29,7 @@ public interface GameActionR2dbcRepository extends R2dbcRepository<GameActionEnt
 
     @Query("SELECT COUNT(*) FROM game_actions WHERE game_id = :gameId AND day_count = :dayCount AND type = :type AND target_user_id = :targetUserId")
     Mono<Long> countByGameIdAndDayCountAndTypeAndTargetUserId(String gameId, Integer dayCount, String type, String targetUserId);
+
+    @Query("SELECT * FROM game_actions WHERE game_id = :gameId AND actor_user_id = :actorUserId AND type = :type ORDER BY day_count DESC")
+    Flux<GameActionEntity> findByGameIdAndActorUserIdAndType(String gameId, String actorUserId, String type);
 }

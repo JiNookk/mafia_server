@@ -54,6 +54,17 @@ public class GameController {
     }
 
     /**
+     * 경찰 조사 결과 조회
+     * GET /games/{gameId}/police-check-results?userId={userId}
+     */
+    @GetMapping("/games/{gameId}/police-check-results")
+    public Mono<PoliceCheckResultResponse> getPoliceCheckResults(
+            @PathVariable String gameId,
+            @RequestParam String userId) {
+        return gameService.getPoliceCheckResults(gameId, userId);
+    }
+
+    /**
      * 행동 등록 (투표, 마피아 살해, 의사 치료, 경찰 조사)
      * POST /api/games/{gameId}/actions
      */

@@ -149,7 +149,7 @@ class GameTest {
         );
 
         // when
-        Game nextGame = game.transitionToNextPhase(phaseDurations);
+        Game nextGame = game.transitionToNextPhase(phaseDurations, false);
 
         // then
         assertEquals(GamePhase.DAY, nextGame.getCurrentPhase());
@@ -182,7 +182,7 @@ class GameTest {
         );
 
         // when
-        Game nextGame = game.transitionToNextPhase(phaseDurations);
+        Game nextGame = game.transitionToNextPhase(phaseDurations, false);
 
         // then
         assertEquals(GamePhase.VOTE, nextGame.getCurrentPhase());
@@ -213,7 +213,7 @@ class GameTest {
         );
 
         // when
-        Game nextGame = game.transitionToNextPhase(phaseDurations);
+        Game nextGame = game.transitionToNextPhase(phaseDurations, true);
 
         // then
         assertEquals(GamePhase.DEFENSE, nextGame.getCurrentPhase());
@@ -243,7 +243,7 @@ class GameTest {
         );
 
         // when
-        Game nextGame = game.transitionToNextPhase(phaseDurations);
+        Game nextGame = game.transitionToNextPhase(phaseDurations, false);
 
         // then
         assertEquals(GamePhase.RESULT, nextGame.getCurrentPhase());
@@ -273,7 +273,7 @@ class GameTest {
         );
 
         // when
-        Game nextGame = game.transitionToNextPhase(phaseDurations);
+        Game nextGame = game.transitionToNextPhase(phaseDurations, false);
 
         // then
         assertEquals(GamePhase.NIGHT, nextGame.getCurrentPhase());
@@ -304,7 +304,7 @@ class GameTest {
         );
 
         // when
-        Game nextGame = game.transitionToNextPhase(phaseDurations);
+        Game nextGame = game.transitionToNextPhase(phaseDurations, false);
 
         // then
         assertEquals(GamePhase.NIGHT, game.getCurrentPhase());
