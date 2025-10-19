@@ -2,9 +2,7 @@ package com.jingwook.mafia_server.handlers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jingwook.mafia_server.enums.WebSocketMessageType;
-import com.jingwook.mafia_server.events.ChatEvent;
-import com.jingwook.mafia_server.events.GameStartedEvent;
-import com.jingwook.mafia_server.events.RoomUpdateEvent;
+import com.jingwook.mafia_server.events.*;
 import com.jingwook.mafia_server.services.RoomService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -160,6 +158,40 @@ public class RoomWebSocketHandler implements WebSocketHandler {
         log.info("WebSocketHandler: Received game started event for roomId: {}", roomId);
 
         broadcastToRoom(roomId, WebSocketMessageType.GAME_STARTED, Map.of("gameId", event.getGameId()));
+    }
+
+    @EventListener
+    @Async
+    public void handlePhaseChangedEvent(PhaseChangedEvent event) {
+        String roomId = event.getRoomId();
+        log.info("WebSocketHandler: Received phase changed event for roomId: {}", roomId);
+
+        broadcastToRoom(roomId, WebSocketMessageType.PHASE_CHANGED, event.getPhaseData());
+    }
+
+    @EventListener
+    @Async
+    public void handlePlayerDiedEvent(PlayerDiedEvent event) {
+        String roomId = event.getRoomId();
+        log.info("WebSocketHandler: Received player died event for roomId: {}", roomId);
+
+        broadcastToRoom(roomId, WebSocketMessageType.PLAYER_DIED, Map.of(
+                "gameId", event.getGameId(),
+                "deadPlayerIds", event.getDeadPlayerIds(),
+                "reason", event.getReason()
+        ));
+    }
+
+    @EventListener
+    @Async
+    public void handleGameEndedEvent(GameEndedEvent event) {
+        String roomId = event.getRoomId();
+        log.info("WebSocketHandler: Received game ended event for roomId: {}", roomId);
+
+        broadcastToRoom(roomId, WebSocketMessageType.GAME_ENDED, Map.of(
+                "gameId", event.getGameId(),
+                "winnerTeam", event.getWinnerTeam()
+        ));
     }
 
     private void broadcastToRoom(String roomId, WebSocketMessageType type, Object data) {

@@ -1,6 +1,8 @@
 package com.jingwook.mafia_server.entities;
 
+import com.jingwook.mafia_server.domains.Game;
 import com.jingwook.mafia_server.enums.GamePhase;
+import com.jingwook.mafia_server.enums.Team;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -60,6 +62,35 @@ public class GameEntity implements Persistable<String> {
 
     public boolean isFinished() {
         return this.finishedAt != null;
+    }
+
+    /**
+     * Entity를 Domain 객체로 변환
+     */
+    public Game toDomain() {
+        return new Game(
+                this.id,
+                this.roomId,
+                this.getCurrentPhaseAsEnum(),
+                this.dayCount,
+                this.phaseStartTime,
+                this.phaseDurationSeconds,
+                this.winnerTeam != null ? Team.valueOf(this.winnerTeam) : null,
+                this.startedAt,
+                this.finishedAt
+        );
+    }
+
+    /**
+     * Domain 객체의 상태를 Entity에 반영
+     */
+    public void updateFromDomain(Game domain) {
+        this.setCurrentPhaseFromEnum(domain.getCurrentPhase());
+        this.dayCount = domain.getDayCount();
+        this.phaseStartTime = domain.getPhaseStartTime();
+        this.phaseDurationSeconds = domain.getPhaseDurationSeconds();
+        this.winnerTeam = domain.getWinnerTeam() != null ? domain.getWinnerTeam().toString() : null;
+        this.finishedAt = domain.getFinishedAt();
     }
 
     @Override

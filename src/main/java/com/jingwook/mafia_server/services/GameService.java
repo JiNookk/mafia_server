@@ -1,15 +1,21 @@
 package com.jingwook.mafia_server.services;
 
 import com.github.f4b6a3.uuid.UuidCreator;
+import com.jingwook.mafia_server.domains.Game;
 import com.jingwook.mafia_server.dtos.*;
 import com.jingwook.mafia_server.entities.GameActionEntity;
 import com.jingwook.mafia_server.entities.GameEntity;
 import com.jingwook.mafia_server.entities.GamePlayerEntity;
 import com.jingwook.mafia_server.entities.RoomMemberEntity;
 import com.jingwook.mafia_server.enums.ActionType;
+import com.jingwook.mafia_server.enums.DeathReason;
 import com.jingwook.mafia_server.enums.GamePhase;
 import com.jingwook.mafia_server.enums.PlayerRole;
+import com.jingwook.mafia_server.enums.Team;
+import com.jingwook.mafia_server.events.GameEndedEvent;
 import com.jingwook.mafia_server.events.GameStartedEvent;
+import com.jingwook.mafia_server.events.PhaseChangedEvent;
+import com.jingwook.mafia_server.events.PlayerDiedEvent;
 import com.jingwook.mafia_server.repositories.*;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -34,11 +40,17 @@ public class GameService {
     private final ApplicationEventPublisher eventPublisher;
 
     // 페이즈별 제한 시간 (초)
-    private static final int NIGHT_DURATION = 60;
-    private static final int DAY_DURATION = 180;
-    private static final int VOTE_DURATION = 120;
-    private static final int DEFENSE_DURATION = 60;
-    private static final int RESULT_DURATION = 30;
+    // private static final int NIGHT_DURATION = 60;
+    // private static final int DAY_DURATION = 180;
+    // private static final int VOTE_DURATION = 120;
+    // private static final int DEFENSE_DURATION = 60;
+    // private static final int RESULT_DURATION = 30;
+
+    private static final int NIGHT_DURATION = 10;
+    private static final int DAY_DURATION = 10;
+    private static final int VOTE_DURATION = 1;
+    private static final int DEFENSE_DURATION = 1;
+    private static final int RESULT_DURATION = 1;
 
     public GameService(
             GameR2dbcRepository gameRepository,
@@ -99,12 +111,12 @@ public class GameService {
     private GameStateResponse buildGameStateResponse(GameEntity game) {
         return GameStateResponse.builder()
                 .gameId(game.getId())
-                .currentPhase(game.getCurrentPhase())
+                .currentPhase(game.getCurrentPhaseAsEnum())
                 .dayCount(game.getDayCount())
                 .phaseStartTime(game.getPhaseStartTime())
                 .phaseDurationSeconds(game.getPhaseDurationSeconds())
                 .remainingSeconds(calculateRemainingSeconds(game))
-                .winnerTeam(game.getWinnerTeam())
+                .winnerTeam(game.getWinnerTeam() != null ? Team.valueOf(game.getWinnerTeam()) : null)
                 .finishedAt(game.getFinishedAt())
                 .build();
     }
@@ -112,7 +124,8 @@ public class GameService {
     private Mono<Void> assignRolesAndSavePlayers(String gameId, List<RoomMemberEntity> members) {
         return validatePlayerCount(members)
                 .then(Mono.defer(() -> {
-                    List<PlayerRole> shuffledRoles = createAndShuffleRoles();
+                    // 도메인 로직으로 역할 생성 및 셔플
+                    List<PlayerRole> shuffledRoles = Game.createShuffledRoles();
                     List<GamePlayerEntity> players = createGamePlayers(gameId, members, shuffledRoles);
                     return gamePlayerRepository.saveAll(players).then();
                 }));
@@ -127,18 +140,8 @@ public class GameService {
         return Mono.empty();
     }
 
-    private List<PlayerRole> createAndShuffleRoles() {
-        List<PlayerRole> roles = Arrays.asList(
-                PlayerRole.MAFIA, PlayerRole.MAFIA,
-                PlayerRole.DOCTOR,
-                PlayerRole.POLICE,
-                PlayerRole.CITIZEN, PlayerRole.CITIZEN, PlayerRole.CITIZEN, PlayerRole.CITIZEN
-        );
-        Collections.shuffle(roles);
-        return roles;
-    }
-
-    private List<GamePlayerEntity> createGamePlayers(String gameId, List<RoomMemberEntity> members, List<PlayerRole> roles) {
+    private List<GamePlayerEntity> createGamePlayers(String gameId, List<RoomMemberEntity> members,
+            List<PlayerRole> roles) {
         List<GamePlayerEntity> players = new ArrayList<>();
         for (int i = 0; i < members.size(); i++) {
             players.add(createGamePlayer(gameId, members.get(i), roles.get(i), i + 1));
@@ -167,7 +170,7 @@ public class GameService {
         return gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "게임 참가자를 찾을 수 없습니다")))
                 .map(player -> MyRoleResponse.builder()
-                        .role(player.getRole())
+                        .role(player.getRoleAsEnum())
                         .isAlive(player.getIsAlive())
                         .position(player.getPosition())
                         .build());
@@ -214,27 +217,17 @@ public class GameService {
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "게임 참가자가 아닙니다")));
     }
 
-    private Mono<Void> validateAndSaveAction(GameEntity game, GamePlayerEntity player, RegisterActionDto dto) {
-        return parseActionType(dto.getType())
-                .flatMap(actionType -> {
-                    if (!validateActionPermission(player, game, actionType)) {
-                        return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "해당 행동을 할 수 없습니다"));
-                    }
-                    return replaceAction(game, dto);
-                });
-    }
-
-    private Mono<ActionType> parseActionType(String typeString) {
-        try {
-            return Mono.just(ActionType.valueOf(typeString));
-        } catch (IllegalArgumentException e) {
-            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "잘못된 행동 타입입니다"));
+    private Mono<Void> validateAndSaveAction(GameEntity game, GamePlayerEntity playerEntity, RegisterActionDto dto) {
+        // 도메인 로직으로 권한 검증
+        if (!playerEntity.toDomain().canPerformAction(game.getCurrentPhaseAsEnum(), dto.getType())) {
+            return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "해당 행동을 할 수 없습니다"));
         }
+        return replaceAction(game, dto);
     }
 
     private Mono<Void> replaceAction(GameEntity game, RegisterActionDto dto) {
         return gameActionRepository.deleteByGameIdAndActorUserIdAndDayCountAndType(
-                        game.getId(), dto.getActorUserId(), game.getDayCount(), dto.getType())
+                game.getId(), dto.getActorUserId(), game.getDayCount(), dto.getType().toString())
                 .then(Mono.defer(() -> createAndSaveAction(game, dto)));
     }
 
@@ -245,7 +238,7 @@ public class GameService {
                 .gameId(game.getId())
                 .dayCount(game.getDayCount())
                 .phase(game.getCurrentPhase())
-                .type(dto.getType())
+                .type(dto.getType().toString())
                 .actorUserId(dto.getActorUserId())
                 .targetUserId(dto.getTargetUserId())
                 .createdAt(LocalDateTime.now())
@@ -253,25 +246,9 @@ public class GameService {
         return gameActionRepository.save(action).then();
     }
 
-    private boolean validateActionPermission(GamePlayerEntity player, GameEntity game, ActionType actionType) {
-        if (!player.getIsAlive()) {
-            return false;
-        }
-
-        GamePhase currentPhase = game.getCurrentPhaseAsEnum();
-        PlayerRole playerRole = player.getRoleAsEnum();
-
-        return switch (actionType) {
-            case VOTE -> currentPhase == GamePhase.VOTE;
-            case MAFIA_KILL -> currentPhase == GamePhase.NIGHT && playerRole == PlayerRole.MAFIA;
-            case DOCTOR_HEAL -> currentPhase == GamePhase.NIGHT && playerRole == PlayerRole.DOCTOR;
-            case POLICE_CHECK -> currentPhase == GamePhase.NIGHT && playerRole == PlayerRole.POLICE;
-        };
-    }
-
     public Mono<VoteStatusResponse> getVoteStatus(String gameId, Integer dayCount) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
-                        gameId, dayCount, ActionType.VOTE.toString())
+                gameId, dayCount, ActionType.VOTE.toString())
                 .collectList()
                 .map(votes -> {
                     List<VoteStatusResponse.VoteInfo> voteInfos = votes.stream()
@@ -303,26 +280,57 @@ public class GameService {
 
     private Mono<NextPhaseResponse> handlePhaseTransition(GameEntity game, NextPhaseResponse.PhaseResult result) {
         return checkGameEnd(game.getId())
-                .flatMap(winner -> {
-                    if (winner != null) {
-                        return endGame(game, winner, result);
+                .flatMap(winnerOpt -> {
+                    if (winnerOpt.isPresent()) {
+                        return endGame(game, winnerOpt.get(), result);
                     } else {
                         return moveToNextPhase(game, result);
                     }
                 });
     }
 
-    private Mono<NextPhaseResponse> endGame(GameEntity game, String winner, NextPhaseResponse.PhaseResult result) {
-        game.setWinnerTeam(winner);
-        game.setFinishedAt(LocalDateTime.now());
-        return gameRepository.save(game)
-                .thenReturn(buildNextPhaseResponse(game, result));
+    private Mono<NextPhaseResponse> endGame(GameEntity gameEntity, Team winner,
+            NextPhaseResponse.PhaseResult result) {
+        // 도메인 로직 실행
+        Game endedGame = gameEntity.toDomain().endGame(winner);
+
+        // 엔티티 업데이트
+        gameEntity.updateFromDomain(endedGame);
+        gameEntity.markAsNotNew();
+
+        NextPhaseResponse response = buildNextPhaseResponse(gameEntity, result);
+
+        return gameRepository.save(gameEntity)
+                .doOnSuccess(savedGame -> {
+                    // 게임 종료 이벤트 발행
+                    eventPublisher.publishEvent(new GameEndedEvent(
+                            savedGame.getRoomId(),
+                            savedGame.getId(),
+                            winner));
+                })
+                .thenReturn(response);
     }
 
-    private Mono<NextPhaseResponse> moveToNextPhase(GameEntity game, NextPhaseResponse.PhaseResult result) {
-        updateToNextPhase(game);
-        return gameRepository.save(game)
-                .thenReturn(buildNextPhaseResponse(game, result));
+    private Mono<NextPhaseResponse> moveToNextPhase(GameEntity gameEntity, NextPhaseResponse.PhaseResult result) {
+        // 도메인 로직 실행
+        Game nextPhaseGame = gameEntity.toDomain()
+                .transitionToNextPhase(getPhaseDurationMap());
+
+        // 엔티티 업데이트
+        gameEntity.updateFromDomain(nextPhaseGame);
+        gameEntity.markAsNotNew();
+
+        NextPhaseResponse response = buildNextPhaseResponse(gameEntity, result);
+
+        return gameRepository.save(gameEntity)
+                .doOnSuccess(savedGame -> {
+                    // 페이즈 변경 이벤트 발행
+                    eventPublisher.publishEvent(new PhaseChangedEvent(
+                            savedGame.getRoomId(),
+                            savedGame.getId(),
+                            response));
+                })
+                .thenReturn(response);
     }
 
     private Mono<NextPhaseResponse.PhaseResult> processPhaseResult(GameEntity game) {
@@ -347,24 +355,59 @@ public class GameService {
 
     private Mono<String> getMafiaKillTarget(GameEntity game) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
-                        game.getId(), game.getDayCount(), ActionType.MAFIA_KILL.toString())
+                game.getId(), game.getDayCount(), ActionType.MAFIA_KILL.toString())
                 .collectList()
-                .map(this::selectTargetFromVotes);
+                .map(votes -> selectTargetFromVotes(votes, true))
+                .defaultIfEmpty("");
+    }
+
+    /**
+     * 투표 결과에서 대상을 선택
+     * 
+     * @param actions       투표 액션 리스트
+     * @param allowTieBreak 동점일 때 첫 번째 선택 여부 (true: 마피아 투표, false: 일반 투표)
+     */
+    private String selectTargetFromVotes(List<GameActionEntity> actions, boolean allowTieBreak) {
+        if (actions.isEmpty()) {
+            return "";
+        }
+
+        Map<String, Long> voteCount = actions.stream()
+                .collect(Collectors.groupingBy(
+                        GameActionEntity::getTargetUserId,
+                        Collectors.counting()));
+
+        long maxVotes = voteCount.values().stream()
+                .max(Long::compareTo)
+                .orElse(0L);
+
+        List<String> topVoted = voteCount.entrySet().stream()
+                .filter(entry -> entry.getValue() == maxVotes)
+                .map(Map.Entry::getKey)
+                .toList();
+
+        if (topVoted.isEmpty()) {
+            return "";
+        }
+
+        // 동점 처리: 마피아는 항상 첫 번째 선택, 일반 투표는 동점 시 처형 없음
+        return (allowTieBreak || topVoted.size() == 1) ? topVoted.get(0) : "";
     }
 
     private Mono<String> getDoctorHealTarget(GameEntity game) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
-                        game.getId(), game.getDayCount(), ActionType.DOCTOR_HEAL.toString())
+                game.getId(), game.getDayCount(), ActionType.DOCTOR_HEAL.toString())
                 .next()
                 .map(GameActionEntity::getTargetUserId)
                 .defaultIfEmpty("");
     }
 
-    private Mono<NextPhaseResponse.PhaseResult> executeNightKill(GameEntity game, String mafiaTarget, String doctorTarget) {
+    private Mono<NextPhaseResponse.PhaseResult> executeNightKill(GameEntity game, String mafiaTarget,
+            String doctorTarget) {
         List<String> deaths = new ArrayList<>();
 
-        // 마피아가 타겟을 선택하지 않았거나, 의사가 살린 경우 사망 없음
-        if (mafiaTarget == null || mafiaTarget.isEmpty() || mafiaTarget.equals(doctorTarget)) {
+        // 도메인 로직: 의사가 마피아 타겟을 살렸는지 판단
+        if (Game.isSavedByDoctor(mafiaTarget, doctorTarget)) {
             return Mono.just(NextPhaseResponse.PhaseResult.builder()
                     .deaths(deaths)
                     .build());
@@ -401,45 +444,36 @@ public class GameService {
 
     private Mono<String> getExecutedUserIdFromVotes(GameEntity game) {
         return gameActionRepository.findByGameIdAndDayCountAndType(
-                        game.getId(), game.getDayCount(), ActionType.VOTE.toString())
+                game.getId(), game.getDayCount(), ActionType.VOTE.toString())
                 .collectList()
-                .map(this::selectTargetFromVotes);
-    }
-
-    private String selectTargetFromVotes(List<GameActionEntity> actions) {
-        if (actions.isEmpty()) {
-            return null;
-        }
-
-        Map<String, Long> voteCount = actions.stream()
-                .collect(Collectors.groupingBy(
-                        GameActionEntity::getTargetUserId,
-                        Collectors.counting()));
-
-        long maxVotes = voteCount.values().stream()
-                .max(Long::compareTo)
-                .orElse(0L);
-
-        List<String> topVoted = voteCount.entrySet().stream()
-                .filter(entry -> entry.getValue() == maxVotes)
-                .map(Map.Entry::getKey)
-                .toList();
-
-        // 동점이면 null 반환 (처형/살해 없음)
-        return topVoted.size() == 1 ? topVoted.get(0) : null;
+                .map(votes -> selectTargetFromVotes(votes, false))
+                .defaultIfEmpty("");
     }
 
     private Mono<Void> killPlayer(String gameId, String userId) {
-        return gamePlayerRepository.findByGameIdAndUserId(gameId, userId)
-                .flatMap(player -> {
+        return Mono.zip(
+                gamePlayerRepository.findByGameIdAndUserId(gameId, userId),
+                gameRepository.findById(gameId)).flatMap(tuple -> {
+                    GamePlayerEntity player = tuple.getT1();
+                    GameEntity game = tuple.getT2();
+
                     player.setIsAlive(false);
                     player.setDiedAt(LocalDateTime.now());
-                    return gamePlayerRepository.save(player);
-                })
-                .then();
+                    player.markAsNotNew();
+
+                    return gamePlayerRepository.save(player)
+                            .doOnSuccess(savedPlayer -> {
+                                // 플레이어 사망 이벤트 발행
+                                eventPublisher.publishEvent(new PlayerDiedEvent(
+                                        game.getRoomId(),
+                                        gameId,
+                                        List.of(userId),
+                                        DeathReason.KILLED));
+                            });
+                }).then();
     }
 
-    private Mono<String> checkGameEnd(String gameId) {
+    private Mono<Optional<Team>> checkGameEnd(String gameId) {
         Mono<Long> aliveMafiaMono = gamePlayerRepository.countByGameIdAndIsAliveAndRole(
                 gameId, true, PlayerRole.MAFIA.toString());
 
@@ -449,60 +483,31 @@ public class GameService {
                 .map(tuple -> tuple.getT1() - tuple.getT2());
 
         return Mono.zip(aliveMafiaMono, aliveCitizensTeamMono)
-                .map(tuple -> {
-                    long aliveMafia = tuple.getT1();
-                    long aliveCitizensTeam = tuple.getT2();
-
-                    if (aliveMafia == 0) {
-                        return "CITIZEN"; // 시민팀 승리
-                    } else if (aliveMafia >= aliveCitizensTeam) {
-                        return "MAFIA"; // 마피아 승리
-                    }
-                    return null; // 게임 계속
-                });
-    }
-
-    private void updateToNextPhase(GameEntity game) {
-        GamePhase currentPhase = game.getCurrentPhaseAsEnum();
-        LocalDateTime now = LocalDateTime.now();
-
-        switch (currentPhase) {
-            case NIGHT -> {
-                game.setCurrentPhaseFromEnum(GamePhase.DAY);
-                game.setPhaseDurationSeconds(DAY_DURATION);
-            }
-            case DAY -> {
-                game.setCurrentPhaseFromEnum(GamePhase.VOTE);
-                game.setPhaseDurationSeconds(VOTE_DURATION);
-            }
-            case VOTE -> {
-                game.setCurrentPhaseFromEnum(GamePhase.DEFENSE);
-                game.setPhaseDurationSeconds(DEFENSE_DURATION);
-            }
-            case DEFENSE -> {
-                game.setCurrentPhaseFromEnum(GamePhase.RESULT);
-                game.setPhaseDurationSeconds(RESULT_DURATION);
-            }
-            case RESULT -> {
-                game.setCurrentPhaseFromEnum(GamePhase.NIGHT);
-                game.setDayCount(game.getDayCount() + 1);
-                game.setPhaseDurationSeconds(NIGHT_DURATION);
-            }
-        }
-
-        game.setPhaseStartTime(now);
+                .map(tuple -> Game.determineWinner(tuple.getT1(), tuple.getT2()));
     }
 
     private NextPhaseResponse buildNextPhaseResponse(GameEntity game, NextPhaseResponse.PhaseResult result) {
-        result.setWinnerTeam(game.getWinnerTeam());
+        result.setWinnerTeam(game.getWinnerTeam() != null ? Team.valueOf(game.getWinnerTeam()) : null);
 
         return NextPhaseResponse.builder()
-                .currentPhase(game.getCurrentPhase())
+                .currentPhase(game.getCurrentPhaseAsEnum())
                 .dayCount(game.getDayCount())
                 .phaseStartTime(game.getPhaseStartTime())
                 .phaseDurationSeconds(game.getPhaseDurationSeconds())
                 .lastPhaseResult(result)
                 .build();
+    }
+
+    /**
+     * 페이즈별 지속 시간 맵 생성
+     */
+    private Map<GamePhase, Integer> getPhaseDurationMap() {
+        return Map.of(
+                GamePhase.NIGHT, NIGHT_DURATION,
+                GamePhase.DAY, DAY_DURATION,
+                GamePhase.VOTE, VOTE_DURATION,
+                GamePhase.DEFENSE, DEFENSE_DURATION,
+                GamePhase.RESULT, RESULT_DURATION);
     }
 
     private Long calculateRemainingSeconds(GameEntity game) {

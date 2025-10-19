@@ -1,5 +1,7 @@
 package com.jingwook.mafia_server.dtos;
 
+import com.jingwook.mafia_server.enums.GamePhase;
+import com.jingwook.mafia_server.enums.Team;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,11 +15,11 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class GameStateResponse {
     private String gameId;
-    private String currentPhase;
+    private GamePhase currentPhase;
     private Integer dayCount;
     private LocalDateTime phaseStartTime;
     private Integer phaseDurationSeconds;
     private Long remainingSeconds;
-    private String winnerTeam;
+    private Team winnerTeam;
     private LocalDateTime finishedAt;
 }

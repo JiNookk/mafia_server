@@ -60,4 +60,19 @@ public class GamePlayerEntity implements Persistable<String> {
     public void markAsNotNew() {
         this.isNew = false;
     }
+
+    /**
+     * Entity를 Domain 객체로 변환
+     */
+    public com.jingwook.mafia_server.domains.GamePlayer toDomain() {
+        return new com.jingwook.mafia_server.domains.GamePlayer(
+                this.id,
+                this.gameId,
+                this.userId,
+                this.getRoleAsEnum(),
+                this.isAlive,
+                this.position,
+                this.diedAt
+        );
+    }
 }

@@ -1,5 +1,7 @@
 package com.jingwook.mafia_server.dtos;
 
+import com.jingwook.mafia_server.enums.GamePhase;
+import com.jingwook.mafia_server.enums.Team;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,7 +15,7 @@ import java.util.List;
 @AllArgsConstructor
 @NoArgsConstructor
 public class NextPhaseResponse {
-    private String currentPhase;
+    private GamePhase currentPhase;
     private Integer dayCount;
     private LocalDateTime phaseStartTime;
     private Integer phaseDurationSeconds;
@@ -26,6 +28,6 @@ public class NextPhaseResponse {
     public static class PhaseResult {
         private List<String> deaths;
         private String executedUserId;
-        private String winnerTeam;
+        private Team winnerTeam;
     }
 }
