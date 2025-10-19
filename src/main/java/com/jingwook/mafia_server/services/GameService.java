@@ -193,7 +193,7 @@ public class GameService {
                                             .map(user -> PoliceCheckResultResponse.CheckResult.builder()
                                                     .targetUserId(targetPlayer.getUserId())
                                                     .targetUsername(user.getNickname())
-                                                    .targetRole(targetPlayer.getRoleAsEnum())
+                                                    .targetRole(convertRoleForPolice(targetPlayer.getRoleAsEnum()))
                                                     .dayCount(action.getDayCount())
                                                     .build())))
                             .collectList()
@@ -514,5 +514,13 @@ public class GameService {
                 GamePhase.VOTE, VOTE_DURATION,
                 GamePhase.DEFENSE, DEFENSE_DURATION,
                 GamePhase.RESULT, RESULT_DURATION);
+    }
+
+    /**
+     * 경찰 조사 결과용 역할 변환
+     * 마피아 -> MAFIA 그대로, 나머지(의사, 경찰) -> CITIZEN으로 변환
+     */
+    private PlayerRole convertRoleForPolice(PlayerRole actualRole) {
+        return actualRole == PlayerRole.MAFIA ? PlayerRole.MAFIA : PlayerRole.CITIZEN;
     }
 }
