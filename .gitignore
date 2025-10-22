@@ -38,3 +38,6 @@ build/*
 
 # claude
 .claude/
+
+# deployment scripts with sensitive info
+deploy-ec2-env.sh
