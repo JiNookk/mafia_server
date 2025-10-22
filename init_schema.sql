@@ -1,12 +1,3 @@
--- MySQL 데이터베이스 생성 스크립트
--- 이 스크립트를 MySQL에서 실행하여 데이터베이스를 생성합니다.
-
-CREATE DATABASE IF NOT EXISTS mafia_game
-    DEFAULT CHARACTER SET utf8mb4
-    COLLATE utf8mb4_unicode_ci;
-
-USE mafia_game;
-
 -- Users 테이블
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(255) PRIMARY KEY,
