@@ -1,7 +1,9 @@
 package com.jingwook.mafia_server.handlers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jingwook.mafia_server.enums.WebSocketMessageType;
 import com.jingwook.mafia_server.events.ChatEvent;
+import com.jingwook.mafia_server.events.GameStartedEvent;
 import com.jingwook.mafia_server.events.RoomUpdateEvent;
 import com.jingwook.mafia_server.services.RoomService;
 import org.slf4j.Logger;
@@ -9,8 +11,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
@@ -96,7 +96,7 @@ public class RoomWebSocketHandler implements WebSocketHandler {
                 .flatMap(roomDetail -> {
                     try {
                         String json = objectMapper.writeValueAsString(Map.of(
-                                "type", "ROOM_UPDATE",
+                                "type", WebSocketMessageType.ROOM_UPDATE.name(),
                                 "data", roomDetail
                         ));
                         sink.tryEmitNext(json);
@@ -138,40 +138,64 @@ public class RoomWebSocketHandler implements WebSocketHandler {
         String roomId = event.getRoomId();
         log.info("WebSocketHandler: Received room update event for roomId: {}", roomId);
 
-        broadcastToRoom(roomId, "ROOM_UPDATE", event.getRoomDetail());
+        broadcastToRoom(roomId, WebSocketMessageType.ROOM_UPDATE, event.getRoomDetail());
     }
 
     @EventListener
     @Async
     public void handleChatEvent(ChatEvent event) {
-        String roomId = event.getRoomId();
+        // ChatEvent.contextId는 대기실 채팅의 경우 roomId
+        String roomId = event.getContextId();
         log.info("WebSocketHandler: Received chat event for roomId: {}", roomId);
 
-        broadcastToRoom(roomId, "CHAT", event.getChatMessage());
+        broadcastToRoom(roomId, WebSocketMessageType.CHAT, event.getChatMessage());
     }
 
-    private void broadcastToRoom(String roomId, String type, Object data) {
+    @EventListener
+    @Async
+    public void handleGameStartedEvent(GameStartedEvent event) {
+        String roomId = event.getRoomId();
+        log.info("WebSocketHandler: Received game started event for roomId: {}", roomId);
+
+        broadcastToRoom(roomId, WebSocketMessageType.GAME_STARTED, Map.of("gameId", event.getGameId()));
+    }
+
+
+    private void broadcastToRoom(String roomId, WebSocketMessageType type, Object data) {
         Sinks.Many<String> sink = roomSinks.get(roomId);
 
-        if (sink != null) {
-            log.info("WebSocketHandler: Found sink for roomId: {}", roomId);
-            try {
-                String json = objectMapper.writeValueAsString(Map.of(
-                        "type", type,
-                        "data", data
-                ));
-                Sinks.EmitResult result = sink.tryEmitNext(json);
-
-                if (result.isFailure()) {
-                    log.warn("Failed to emit {} for room {}: {}", type, roomId, result);
-                } else {
-                    log.info("WebSocketHandler: Successfully emitted {} for roomId: {}", type, roomId);
-                }
-            } catch (Exception e) {
-                log.error("Failed to serialize {} for room: {}", type, roomId, e);
-            }
-        } else {
+        if (sink == null) {
             log.warn("WebSocketHandler: No sink found for roomId: {}", roomId);
+            return;
+        }
+
+        log.info("WebSocketHandler: Found sink for roomId: {}", roomId);
+        serializeAndEmit(roomId, type, data, sink);
+    }
+
+    private void serializeAndEmit(String roomId, WebSocketMessageType type, Object data, Sinks.Many<String> sink) {
+        try {
+            String json = serializeMessage(type, data);
+            emitMessage(roomId, type, json, sink);
+        } catch (Exception e) {
+            log.error("Failed to serialize {} for room: {}", type, roomId, e);
+        }
+    }
+
+    private String serializeMessage(WebSocketMessageType type, Object data) throws Exception {
+        return objectMapper.writeValueAsString(Map.of(
+                "type", type.name(),
+                "data", data
+        ));
+    }
+
+    private void emitMessage(String roomId, WebSocketMessageType type, String json, Sinks.Many<String> sink) {
+        Sinks.EmitResult result = sink.tryEmitNext(json);
+
+        if (result.isFailure()) {
+            log.warn("Failed to emit {} for room {}: {}", type, roomId, result);
+        } else {
+            log.info("WebSocketHandler: Successfully emitted {} for roomId: {}", type, roomId);
         }
     }
 }

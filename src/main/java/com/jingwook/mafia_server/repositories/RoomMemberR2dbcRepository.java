@@ -8,7 +8,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Repository
-public interface RoomMemberR2dbcRepository extends R2dbcRepository<RoomMemberEntity, Long> {
+public interface RoomMemberR2dbcRepository extends R2dbcRepository<RoomMemberEntity, String> {
 
     Flux<RoomMemberEntity> findByRoomId(String roomId);
 

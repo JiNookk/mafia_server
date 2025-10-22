@@ -8,7 +8,7 @@ import lombok.Setter;
 public class SessionResponseDto {
     private String userId;
     private String nickname;
-    private String roomId;
+    private CurrentRoomDto currentRoom;
 
     public SessionResponseDto(){}
 
@@ -17,9 +17,9 @@ public class SessionResponseDto {
         this.nickname = nickname;
     }
 
-    public SessionResponseDto(String userId, String nickname, String roomId){
+    public SessionResponseDto(String userId, String nickname, CurrentRoomDto currentRoom){
         this.userId = userId;
         this.nickname = nickname;
-        this.roomId = roomId;
+        this.currentRoom = currentRoom;
     }
 }

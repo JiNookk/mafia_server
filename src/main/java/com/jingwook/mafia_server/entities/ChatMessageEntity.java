@@ -20,8 +20,8 @@ public class ChatMessageEntity {
     @Id
     private Long id;
 
-    @Column("room_id")
-    private String roomId;
+    @Column("context_id")
+    private String contextId; // roomId 또는 gameId
 
     @Column("user_id")
     private String userId;

@@ -1,7 +1,6 @@
 package com.jingwook.mafia_server.entities;
 
-import com.jingwook.mafia_server.enums.GameRole;
-import com.jingwook.mafia_server.enums.ParticipatingRole;
+import com.jingwook.mafia_server.enums.PlayerRole;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,8 +17,8 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("room_members")
-public class RoomMemberEntity implements Persistable<String> {
+@Table("game_players")
+public class GamePlayerEntity implements Persistable<String> {
     @Id
     private String id;
 
@@ -27,8 +26,8 @@ public class RoomMemberEntity implements Persistable<String> {
     @Builder.Default
     private boolean isNew = true;
 
-    @Column("room_id")
-    private String roomId;
+    @Column("game_id")
+    private String gameId;
 
     @Column("user_id")
     private String userId;
@@ -36,29 +35,21 @@ public class RoomMemberEntity implements Persistable<String> {
     @Column("role")
     private String role;
 
-    @Column("game_role")
-    private String gameRole;
-
     @Column("is_alive")
     private Boolean isAlive;
 
-    @Column("joined_at")
-    private LocalDateTime joinedAt;
+    @Column("position")
+    private Integer position;
 
-    public ParticipatingRole getRoleAsEnum() {
-        return ParticipatingRole.valueOf(this.role);
+    @Column("died_at")
+    private LocalDateTime diedAt;
+
+    public PlayerRole getRoleAsEnum() {
+        return PlayerRole.valueOf(this.role);
     }
 
-    public void setRoleFromEnum(ParticipatingRole participatingRole) {
-        this.role = participatingRole.toString();
-    }
-
-    public GameRole getGameRoleAsEnum() {
-        return gameRole != null ? GameRole.valueOf(this.gameRole) : null;
-    }
-
-    public void setGameRoleFromEnum(GameRole gameRole) {
-        this.gameRole = gameRole != null ? gameRole.toString() : null;
+    public void setRoleFromEnum(PlayerRole playerRole) {
+        this.role = playerRole.toString();
     }
 
     @Override
@@ -68,5 +59,20 @@ public class RoomMemberEntity implements Persistable<String> {
 
     public void markAsNotNew() {
         this.isNew = false;
+    }
+
+    /**
+     * Entity를 Domain 객체로 변환
+     */
+    public com.jingwook.mafia_server.domains.GamePlayer toDomain() {
+        return new com.jingwook.mafia_server.domains.GamePlayer(
+                this.id,
+                this.gameId,
+                this.userId,
+                this.getRoleAsEnum(),
+                this.isAlive,
+                this.position,
+                this.diedAt
+        );
     }
 }

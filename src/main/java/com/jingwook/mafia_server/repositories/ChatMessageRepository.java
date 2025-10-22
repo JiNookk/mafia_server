@@ -11,17 +11,17 @@ public interface ChatMessageRepository extends R2dbcRepository<ChatMessageEntity
 
     @Query("SELECT * FROM (" +
            "  SELECT * FROM chat_messages " +
-           "  WHERE room_id = :roomId AND chat_type = :chatType " +
+           "  WHERE context_id = :contextId AND chat_type = :chatType " +
            "  ORDER BY created_at DESC LIMIT :limit" +
            ") AS recent " +
            "ORDER BY created_at ASC")
-    Flux<ChatMessageEntity> findByRoomIdAndChatType(String roomId, String chatType, int limit);
+    Flux<ChatMessageEntity> findByContextIdAndChatType(String contextId, String chatType, int limit);
 
     @Query("SELECT * FROM (" +
            "  SELECT * FROM chat_messages " +
-           "  WHERE room_id = :roomId " +
+           "  WHERE context_id = :contextId " +
            "  ORDER BY created_at DESC LIMIT :limit" +
            ") AS recent " +
            "ORDER BY created_at ASC")
-    Flux<ChatMessageEntity> findByRoomIdOrderByCreatedAtDesc(String roomId, int limit);
+    Flux<ChatMessageEntity> findByContextIdOrderByCreatedAtDesc(String contextId, int limit);
 }
