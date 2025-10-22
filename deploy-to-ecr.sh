@@ -27,7 +27,7 @@ echo -e "${GREEN}✅ ECR login successful!${NC}\n"
 
 # Docker 이미지 빌드
 echo -e "${BLUE}2. Building Docker image...${NC}"
-docker build -t mafia-server:${IMAGE_TAG} .
+docker buildx build --platform linux/amd64 -t mafia-server:${IMAGE_TAG} .
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Docker build failed!${NC}"
