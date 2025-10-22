@@ -40,16 +40,11 @@ public class GameService {
     private final ApplicationEventPublisher eventPublisher;
 
     // 페이즈별 제한 시간 (초)
-    // private static final int NIGHT_DURATION = 30;
-    // private static final int DAY_DURATION = 30;
-    // private static final int VOTE_DURATION = 10;
-    // private static final int DEFENSE_DURATION = 10;
-    // private static final int RESULT_DURATION = 10;
-    private static final int NIGHT_DURATION = 5;
-    private static final int DAY_DURATION = 10;
-    private static final int VOTE_DURATION = 2;
-    private static final int DEFENSE_DURATION = 2;
-    private static final int RESULT_DURATION = 2;
+    private static final int NIGHT_DURATION = 30;
+    private static final int DAY_DURATION = 30;
+    private static final int VOTE_DURATION = 10;
+    private static final int DEFENSE_DURATION = 10;
+    private static final int RESULT_DURATION = 10;
 
     public GameService(
             GameR2dbcRepository gameRepository,
@@ -278,10 +273,15 @@ public class GameService {
     }
 
     public Mono<VoteStatusResponse> getVoteStatus(String gameId, Integer dayCount) {
-        return gameActionRepository.findByGameIdAndDayCountAndType(
-                gameId, dayCount, ActionType.VOTE.toString())
-                .collectList()
-                .map(votes -> {
+        return Mono.zip(
+                gameActionRepository.findByGameIdAndDayCountAndType(
+                        gameId, dayCount, ActionType.VOTE.toString())
+                        .collectList(),
+                gamePlayerRepository.countByGameIdAndIsAlive(gameId, true))
+                .map(tuple -> {
+                    List<GameActionEntity> votes = tuple.getT1();
+                    long alivePlayers = tuple.getT2();
+
                     List<VoteStatusResponse.VoteInfo> voteInfos = votes.stream()
                             .map(vote -> VoteStatusResponse.VoteInfo.builder()
                                     .voterUserId(vote.getActorUserId())
@@ -294,9 +294,36 @@ public class GameService {
                                     GameActionEntity::getTargetUserId,
                                     Collectors.counting()));
 
+                    // 최다득표자 계산
+                    String topVotedUserId = null;
+                    Long topVoteCount = 0L;
+                    Boolean hasMajority = false;
+
+                    if (!voteCount.isEmpty()) {
+                        topVoteCount = voteCount.values().stream()
+                                .max(Long::compareTo)
+                                .orElse(0L);
+
+                        long finalTopVoteCount = topVoteCount;
+                        List<String> topCandidates = voteCount.entrySet().stream()
+                                .filter(entry -> entry.getValue().equals(finalTopVoteCount))
+                                .map(Map.Entry::getKey)
+                                .toList();
+
+                        // 동점이 아닌 경우에만 최다득표자 설정
+                        if (topCandidates.size() == 1) {
+                            topVotedUserId = topCandidates.get(0);
+                            long majorityThreshold = (alivePlayers / 2) + 1;
+                            hasMajority = topVoteCount >= majorityThreshold;
+                        }
+                    }
+
                     return VoteStatusResponse.builder()
                             .votes(voteInfos)
                             .voteCount(voteCount)
+                            .topVotedUserId(topVotedUserId)
+                            .topVoteCount(topVoteCount)
+                            .hasMajority(hasMajority)
                             .build();
                 });
     }
