@@ -7,6 +7,7 @@ import com.jingwook.mafia_server.events.ChatEvent;
 import com.jingwook.mafia_server.events.GameEndedEvent;
 import com.jingwook.mafia_server.events.PhaseChangedEvent;
 import com.jingwook.mafia_server.events.PlayerDiedEvent;
+import com.jingwook.mafia_server.services.RedisMessageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
@@ -17,6 +18,7 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import jakarta.annotation.PostConstruct;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,6 +28,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private static final Logger log = LoggerFactory.getLogger(GameWebSocketHandler.class);
 
     private final ObjectMapper objectMapper;
+    private final RedisMessageService redisMessageService;
 
     // "gameId-chatType" -> Sink (채팅용)
     private final Map<String, Sinks.Many<String>> gameChatSinks = new ConcurrentHashMap<>();
@@ -37,8 +40,61 @@ public class GameWebSocketHandler implements WebSocketHandler {
     // gameId -> 연결 수 (게임 이벤트용)
     private final Map<String, AtomicInteger> eventConnectionCounts = new ConcurrentHashMap<>();
 
-    public GameWebSocketHandler(ObjectMapper objectMapper) {
+    public GameWebSocketHandler(ObjectMapper objectMapper, RedisMessageService redisMessageService) {
         this.objectMapper = objectMapper;
+        this.redisMessageService = redisMessageService;
+    }
+
+    /**
+     * Redis Pub/Sub 구독 시작
+     */
+    @PostConstruct
+    public void subscribeToRedis() {
+        // 게임 채팅 구독
+        redisMessageService.subscribeToGameChat()
+                .doOnNext(message -> {
+                    if (message == null) {
+                        return;
+                    }
+                    String sinkKey = message.getKey();
+                    Sinks.Many<String> sink = gameChatSinks.get(sinkKey);
+                    if (sink != null) {
+                        try {
+                            String json = objectMapper.writeValueAsString(Map.of(
+                                    "type", WebSocketMessageType.CHAT.name(),
+                                    "data", message.getData()
+                            ));
+                            sink.tryEmitNext(json);
+                        } catch (Exception e) {
+                            log.error("Failed to emit Redis chat message", e);
+                        }
+                    }
+                })
+                .onErrorContinue((error, obj) -> log.error("Error in Redis chat subscription, continuing", error))
+                .subscribe();
+
+        // 게임 이벤트 구독
+        redisMessageService.subscribeToGameEvents()
+                .doOnNext(message -> {
+                    if (message == null) {
+                        return;
+                    }
+                    String gameId = message.getKey();
+                    Sinks.Many<String> sink = gameEventSinks.get(gameId);
+                    if (sink != null) {
+                        try {
+                            String json = objectMapper.writeValueAsString(Map.of(
+                                    "type", message.getType().name(),
+                                    "data", message.getData()
+                            ));
+                            sink.tryEmitNext(json);
+                        } catch (Exception e) {
+                            log.error("Failed to emit Redis event message", e);
+                        }
+                    }
+                })
+                .onErrorContinue((error, obj) -> log.error("Error in Redis event subscription, continuing", error))
+                .subscribe();
     }
 
     @Override
@@ -71,14 +127,20 @@ public class GameWebSocketHandler implements WebSocketHandler {
             return session.close();
         }
 
+        log.info("🔌 WebSocket CONNECTED - GameId: {}, SessionId: {}", gameId, session.getId());
+
         Sinks.Many<String> sink = getOrCreateEventSink(gameId);
         incrementEventConnectionCount(gameId);
+
+        log.info("📊 Current connections for game {}: {}", gameId, eventConnectionCounts.get(gameId).get());
 
         Mono<Void> output = createOutputMono(session, sink);
         Mono<Void> input = createInputMono(session);
 
         return Mono.zip(input, output).then()
                 .doFinally(signalType -> {
+                    log.info("🔌 WebSocket DISCONNECTED - GameId: {}, SessionId: {}, Signal: {}",
+                            gameId, session.getId(), signalType);
                     decrementEventConnectionCount(gameId);
                     cleanupEventSinkIfNoConnections(gameId);
                 });
@@ -138,7 +200,10 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Sinks.Many<String> getOrCreateEventSink(String gameId) {
         return gameEventSinks.computeIfAbsent(
                 gameId,
-                k -> Sinks.many().multicast().onBackpressureBuffer());
+                k -> {
+                    log.info("✨ Creating NEW Sink for gameId: {}", gameId);
+                    return Sinks.many().multicast().onBackpressureBuffer();
+                });
     }
 
     private void incrementEventConnectionCount(String gameId) {
@@ -189,14 +254,23 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> createOutputMono(WebSocketSession session, Sinks.Many<String> sink) {
-        return session.send(sink.asFlux().map(session::textMessage));
+        return session.send(
+            sink.asFlux()
+                .map(session::textMessage)
+                .doOnError(e -> log.error("Error sending WebSocket message", e))
+        );
     }
 
     private Mono<Void> createInputMono(WebSocketSession session) {
         return session.receive()
-                .map(msg -> msg.getPayloadAsText())
-                .doOnNext(message -> {
-                    log.debug("Received message: {}", message);
+                .doOnNext(msg -> {
+                    try {
+                        String text = msg.getPayloadAsText();
+                        log.debug("Received message: {}", text);
+                    } finally {
+                        // DataBuffer 명시적 해제
+                        msg.release();
+                    }
                 })
                 .then();
     }
@@ -217,9 +291,12 @@ public class GameWebSocketHandler implements WebSocketHandler {
             return;
         }
 
-        String sinkKey = buildSinkKey(gameId, chatType);
-        log.info("GameWebSocketHandler: Received chat event for sinkKey: {}", sinkKey);
-        broadcastToGameChat(sinkKey, event.getChatMessage());
+        log.info("GameWebSocketHandler: Received chat event for gameId: {}", gameId);
+
+        // Redis로 발행
+        redisMessageService.publishGameChat(gameId, chatType.toString(), event.getChatMessage())
+                .doOnSuccess(count -> log.info("Published game chat to Redis"))
+                .subscribe();
     }
 
     @EventListener
@@ -228,7 +305,13 @@ public class GameWebSocketHandler implements WebSocketHandler {
         String gameId = event.getGameId();
         log.info("GameWebSocketHandler: Received phase changed event for gameId: {}", gameId);
 
-        broadcastToGameEvent(gameId, WebSocketMessageType.PHASE_CHANGED, event.getPhaseData());
+        // 1. 로컬 Sink에 직접 전달 (즉시 처리)
+        broadcastToGameEventLocal(gameId, WebSocketMessageType.PHASE_CHANGED, event.getPhaseData());
+
+        // 2. Redis로 발행 (다른 서버로 전파)
+        redisMessageService.publishGameEvent(gameId, WebSocketMessageType.PHASE_CHANGED, event.getPhaseData())
+                .doOnSuccess(count -> log.info("Published phase changed to Redis"))
+                .subscribe();
     }
 
     @EventListener
@@ -237,11 +320,19 @@ public class GameWebSocketHandler implements WebSocketHandler {
         String gameId = event.getGameId();
         log.info("GameWebSocketHandler: Received player died event for gameId: {}", gameId);
 
-        broadcastToGameEvent(gameId, WebSocketMessageType.PLAYER_DIED, Map.of(
+        Map<String, Object> data = Map.of(
                 "gameId", event.getGameId(),
                 "deadPlayerIds", event.getDeadPlayerIds(),
                 "reason", event.getReason()
-        ));
+        );
+
+        // 1. 로컬 Sink에 직접 전달
+        broadcastToGameEventLocal(gameId, WebSocketMessageType.PLAYER_DIED, data);
+
+        // 2. Redis로 발행
+        redisMessageService.publishGameEvent(gameId, WebSocketMessageType.PLAYER_DIED, data)
+                .doOnSuccess(count -> log.info("Published player died to Redis"))
+                .subscribe();
     }
 
     @EventListener
@@ -250,10 +341,18 @@ public class GameWebSocketHandler implements WebSocketHandler {
         String gameId = event.getGameId();
         log.info("GameWebSocketHandler: Received game ended event for gameId: {}", gameId);
 
-        broadcastToGameEvent(gameId, WebSocketMessageType.GAME_ENDED, Map.of(
+        Map<String, Object> data = Map.of(
                 "gameId", event.getGameId(),
                 "winnerTeam", event.getWinnerTeam()
-        ));
+        );
+
+        // 1. 로컬 Sink에 직접 전달
+        broadcastToGameEventLocal(gameId, WebSocketMessageType.GAME_ENDED, data);
+
+        // 2. Redis로 발행
+        redisMessageService.publishGameEvent(gameId, WebSocketMessageType.GAME_ENDED, data)
+                .doOnSuccess(count -> log.info("Published game ended to Redis"))
+                .subscribe();
     }
 
     private boolean isGameChat(ChatType chatType) {
@@ -264,79 +363,38 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return gameId + "-" + chatType;
     }
 
-    private void broadcastToGameEvent(String gameId, WebSocketMessageType type, Object data) {
+    /**
+     * 로컬 Sink로 직접 게임 이벤트 브로드캐스트
+     * Redis 구독 실패 시에도 현재 서버의 클라이언트에게 메시지 전달
+     */
+    private void broadcastToGameEventLocal(String gameId, WebSocketMessageType type, Object data) {
         Sinks.Many<String> sink = gameEventSinks.get(gameId);
 
+        log.info("📤 Broadcasting {} to gameId: {}, Sink exists: {}", type, gameId, (sink != null));
+
         if (sink == null) {
-            log.warn("GameWebSocketHandler: No event sink found for gameId: {}", gameId);
+            log.warn("⚠️ No local sink found for gameId: {} (no clients connected to this server)", gameId);
+            log.info("Available sinks: {}", gameEventSinks.keySet());
             return;
         }
 
-        log.info("GameWebSocketHandler: Found event sink for gameId: {}", gameId);
-        serializeAndEmitGameEvent(gameId, type, data, sink);
-    }
-
-    private void serializeAndEmitGameEvent(String gameId, WebSocketMessageType type, Object data, Sinks.Many<String> sink) {
         try {
-            String json = serializeMessage(type, data);
-            emitGameEventMessage(gameId, type, json, sink);
+            String json = objectMapper.writeValueAsString(Map.of(
+                    "type", type.name(),
+                    "data", data
+            ));
+
+            log.info("📨 Sending message: {}", json.substring(0, Math.min(100, json.length())) + "...");
+
+            Sinks.EmitResult result = sink.tryEmitNext(json);
+
+            if (result.isFailure()) {
+                log.error("❌ Failed to emit {} to local sink for game {}: {}", type, gameId, result);
+            } else {
+                log.info("✅ Successfully emitted {} to local sink for gameId: {}", type, gameId);
+            }
         } catch (Exception e) {
-            log.error("Failed to serialize {} for game: {}", type, gameId, e);
-        }
-    }
-
-    private void emitGameEventMessage(String gameId, WebSocketMessageType type, String json, Sinks.Many<String> sink) {
-        Sinks.EmitResult result = sink.tryEmitNext(json);
-
-        if (result.isFailure()) {
-            log.warn("Failed to emit {} for game {}: {}", type, gameId, result);
-        } else {
-            log.info("GameWebSocketHandler: Successfully emitted {} for gameId: {}", type, gameId);
-        }
-    }
-
-    private void broadcastToGameChat(String sinkKey, Object data) {
-        Sinks.Many<String> sink = gameChatSinks.get(sinkKey);
-
-        if (sink == null) {
-            log.warn("GameWebSocketHandler: No sink found for sinkKey: {}", sinkKey);
-            return;
-        }
-
-        log.info("GameWebSocketHandler: Found sink for sinkKey: {}", sinkKey);
-        serializeAndEmitGameChat(sinkKey, data, sink);
-    }
-
-    private void serializeAndEmitGameChat(String sinkKey, Object data, Sinks.Many<String> sink) {
-        try {
-            String json = serializeChatMessage(data);
-            emitChatMessage(sinkKey, json, sink);
-        } catch (Exception e) {
-            log.error("Failed to serialize CHAT for sinkKey: {}", sinkKey, e);
-        }
-    }
-
-    private String serializeMessage(WebSocketMessageType type, Object data) throws Exception {
-        return objectMapper.writeValueAsString(Map.of(
-                "type", type.name(),
-                "data", data
-        ));
-    }
-
-    private String serializeChatMessage(Object data) throws Exception {
-        return objectMapper.writeValueAsString(Map.of(
-                "type", WebSocketMessageType.CHAT.name(),
-                "data", data
-        ));
-    }
-
-    private void emitChatMessage(String sinkKey, String json, Sinks.Many<String> sink) {
-        Sinks.EmitResult result = sink.tryEmitNext(json);
-
-        if (result.isFailure()) {
-            log.warn("Failed to emit CHAT for sinkKey {}: {}", sinkKey, result);
-        } else {
-            log.info("GameWebSocketHandler: Successfully emitted CHAT for sinkKey: {}", sinkKey);
+            log.error("💥 Exception while broadcasting {} to local sink", type, e);
         }
     }
 

@@ -19,24 +19,30 @@ public class GameSchedulerService {
 
     private final GameR2dbcRepository gameRepository;
     private final GameService gameService;
+    private final RedisLockService redisLockService;
 
-    // 현재 처리 중인 게임 ID를 추적하여 중복 처리 방지
-    private final Set<String> processingGames = ConcurrentHashMap.newKeySet();
-
-    public GameSchedulerService(GameR2dbcRepository gameRepository, GameService gameService) {
+    public GameSchedulerService(
+            GameR2dbcRepository gameRepository,
+            GameService gameService,
+            RedisLockService redisLockService) {
         this.gameRepository = gameRepository;
         this.gameService = gameService;
+        this.redisLockService = redisLockService;
     }
 
     /**
      * 1초마다 진행 중인 게임들의 페이즈 시간을 체크하여 자동으로 다음 페이즈로 전환
+     * Redis 분산 락을 사용하여 여러 서버에서 중복 처리 방지
      */
     @Scheduled(fixedRate = 1000)
     public void checkPhaseTimeouts() {
         gameRepository.findAllActiveGames()
+                .doOnNext(game -> log.debug("🔍 Checking game: {}, phase: {}, started: {}",
+                    game.getId(), game.getCurrentPhase(), game.getPhaseStartTime()))
                 .filter(this::isPhaseExpired)
-                .filter(game -> processingGames.add(game.getId())) // 중복 처리 방지
-                .flatMap(this::processExpiredGame)
+                .doOnNext(game -> log.info("⏰ Phase expired for game: {}", game.getId()))
+                .flatMap(this::processExpiredGameWithLock)
+                .doOnError(error -> log.error("❌ Error in scheduler", error))
                 .subscribe();
     }
 
@@ -44,13 +50,46 @@ public class GameSchedulerService {
      * 도메인 로직을 사용하여 페이즈 만료 확인
      */
     private boolean isPhaseExpired(GameEntity entity) {
-        return entity.toDomain().isPhaseExpired();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime phaseStart = entity.getPhaseStartTime();
+        Integer duration = entity.getPhaseDurationSeconds();
+
+        if (phaseStart == null || duration == null) {
+            log.debug("⚠️ Phase check skipped - null values: start={}, duration={}", phaseStart, duration);
+            return false;
+        }
+
+        LocalDateTime expireTime = phaseStart.plusSeconds(duration);
+        boolean expired = now.isAfter(expireTime);
+
+        log.debug("⏱️ Phase check - game: {}, now: {}, expire: {}, expired: {}",
+            entity.getId(), now, expireTime, expired);
+
+        if (expired) {
+            log.info("⏰ Phase expired for game: {}, phase: {}, started: {}, duration: {}s",
+                entity.getId(), entity.getCurrentPhase(), phaseStart, duration);
+        }
+        return expired;
+    }
+
+    /**
+     * 분산 락을 사용하여 게임 처리
+     * 락 키: phase:transition:{gameId}
+     */
+    private Mono<Void> processExpiredGameWithLock(GameEntity game) {
+        String lockKey = "phase:transition:" + game.getId();
+
+        return redisLockService.executeWithLock(lockKey, processExpiredGame(game))
+                .onErrorResume(RedisLockService.LockNotAcquiredException.class, error -> {
+                    log.debug("Another server is processing game: {}", game.getId());
+                    return Mono.empty();
+                })
+                .onErrorResume(error -> handlePhaseTransitionError(game.getId(), error));
     }
 
     private Mono<Void> processExpiredGame(GameEntity game) {
         log.info("Auto phase transition triggered for game: {}", game.getId());
         return gameService.nextPhase(game.getId())
-                .doFinally(signal -> processingGames.remove(game.getId())) // 처리 완료 후 제거
                 .then()
                 .onErrorResume(error -> handlePhaseTransitionError(game.getId(), error));
     }

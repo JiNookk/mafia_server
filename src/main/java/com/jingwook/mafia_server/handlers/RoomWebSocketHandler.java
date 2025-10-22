@@ -5,6 +5,7 @@ import com.jingwook.mafia_server.enums.WebSocketMessageType;
 import com.jingwook.mafia_server.events.ChatEvent;
 import com.jingwook.mafia_server.events.GameStartedEvent;
 import com.jingwook.mafia_server.events.RoomUpdateEvent;
+import com.jingwook.mafia_server.services.RedisMessageService;
 import com.jingwook.mafia_server.services.RoomService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +17,7 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import jakarta.annotation.PostConstruct;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,15 +28,51 @@ public class RoomWebSocketHandler implements WebSocketHandler {
 
     private final RoomService roomService;
     private final ObjectMapper objectMapper;
+    private final RedisMessageService redisMessageService;
 
     // roomId -> Sink
     private final Map<String, Sinks.Many<String>> roomSinks = new ConcurrentHashMap<>();
     // roomId -> 연결 수 (Sink의 currentSubscriberCount()는 정확하지 않을 수 있으므로)
     private final Map<String, AtomicInteger> connectionCounts = new ConcurrentHashMap<>();
 
-    public RoomWebSocketHandler(RoomService roomService, ObjectMapper objectMapper) {
+    public RoomWebSocketHandler(
+            RoomService roomService,
+            ObjectMapper objectMapper,
+            RedisMessageService redisMessageService) {
         this.roomService = roomService;
         this.objectMapper = objectMapper;
+        this.redisMessageService = redisMessageService;
+    }
+
+    /**
+     * Redis Pub/Sub 구독 시작
+     * 다른 서버 인스턴스에서 발행한 메시지를 받아서 로컬 Sink로 전달
+     */
+    @PostConstruct
+    public void subscribeToRedis() {
+        redisMessageService.subscribeToRoomUpdates()
+                .doOnNext(message -> {
+                    if (message == null) {
+                        return;
+                    }
+                    String roomId = message.getKey();
+                    log.info("Received Redis message for roomId: {}", roomId);
+
+                    Sinks.Many<String> sink = roomSinks.get(roomId);
+                    if (sink != null) {
+                        try {
+                            String json = objectMapper.writeValueAsString(Map.of(
+                                    "type", message.getType().name(),
+                                    "data", message.getData()
+                            ));
+                            sink.tryEmitNext(json);
+                        } catch (Exception e) {
+                            log.error("Failed to emit Redis message to sink", e);
+                        }
+                    }
+                })
+                .onErrorContinue((error, obj) -> log.error("Error in Redis subscription, continuing", error))
+                .subscribe();
     }
 
     @Override
@@ -88,7 +126,11 @@ public class RoomWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> createOutputMono(WebSocketSession session, Sinks.Many<String> sink) {
-        return session.send(sink.asFlux().map(session::textMessage));
+        return session.send(
+            sink.asFlux()
+                .map(session::textMessage)
+                .doOnError(e -> log.error("Error sending WebSocket message", e))
+        );
     }
 
     private Mono<Void> sendInitialRoomData(String roomId, Sinks.Many<String> sink) {
@@ -115,10 +157,15 @@ public class RoomWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> createInputMono(WebSocketSession session) {
         return session.receive()
-                .map(msg -> msg.getPayloadAsText())
-                .doOnNext(message -> {
-                    // 필요시 클라이언트 메시지 처리 (ping/pong 등)
-                    log.debug("Received message: {}", message);
+                .doOnNext(msg -> {
+                    try {
+                        String text = msg.getPayloadAsText();
+                        // 필요시 클라이언트 메시지 처리 (ping/pong 등)
+                        log.debug("Received message: {}", text);
+                    } finally {
+                        // DataBuffer 명시적 해제
+                        msg.release();
+                    }
                 })
                 .then();
     }
@@ -138,7 +185,13 @@ public class RoomWebSocketHandler implements WebSocketHandler {
         String roomId = event.getRoomId();
         log.info("WebSocketHandler: Received room update event for roomId: {}", roomId);
 
-        broadcastToRoom(roomId, WebSocketMessageType.ROOM_UPDATE, event.getRoomDetail());
+        // 1. 로컬 Sink에 직접 전달
+        broadcastToRoomLocal(roomId, WebSocketMessageType.ROOM_UPDATE, event.getRoomDetail());
+
+        // 2. Redis로 발행 (다른 서버로 전파)
+        redisMessageService.publishRoomUpdate(roomId, event.getRoomDetail())
+                .doOnSuccess(count -> log.info("Published room update to Redis for roomId: {}", roomId))
+                .subscribe();
     }
 
     @EventListener
@@ -148,7 +201,13 @@ public class RoomWebSocketHandler implements WebSocketHandler {
         String roomId = event.getContextId();
         log.info("WebSocketHandler: Received chat event for roomId: {}", roomId);
 
-        broadcastToRoom(roomId, WebSocketMessageType.CHAT, event.getChatMessage());
+        // 1. 로컬 Sink에 직접 전달
+        broadcastToRoomLocal(roomId, WebSocketMessageType.CHAT, event.getChatMessage());
+
+        // 2. Redis로 발행
+        redisMessageService.publishRoomUpdate(roomId, event.getChatMessage())
+                .doOnSuccess(count -> log.info("Published chat to Redis for roomId: {}", roomId))
+                .subscribe();
     }
 
     @EventListener
@@ -157,20 +216,43 @@ public class RoomWebSocketHandler implements WebSocketHandler {
         String roomId = event.getRoomId();
         log.info("WebSocketHandler: Received game started event for roomId: {}", roomId);
 
-        broadcastToRoom(roomId, WebSocketMessageType.GAME_STARTED, Map.of("gameId", event.getGameId()));
+        Map<String, Object> data = Map.of("gameId", event.getGameId());
+
+        // 1. 로컬 Sink에 직접 전달
+        broadcastToRoomLocal(roomId, WebSocketMessageType.GAME_STARTED, data);
+
+        // 2. Redis로 발행
+        redisMessageService.publishRoomUpdate(roomId, data)
+                .doOnSuccess(count -> log.info("Published game started to Redis for roomId: {}", roomId))
+                .subscribe();
     }
 
-
-    private void broadcastToRoom(String roomId, WebSocketMessageType type, Object data) {
+    /**
+     * 로컬 Sink로 직접 방 메시지 브로드캐스트
+     */
+    private void broadcastToRoomLocal(String roomId, WebSocketMessageType type, Object data) {
         Sinks.Many<String> sink = roomSinks.get(roomId);
 
         if (sink == null) {
-            log.warn("WebSocketHandler: No sink found for roomId: {}", roomId);
+            log.debug("No local sink found for roomId: {} (no clients connected)", roomId);
             return;
         }
 
-        log.info("WebSocketHandler: Found sink for roomId: {}", roomId);
-        serializeAndEmit(roomId, type, data, sink);
+        try {
+            String json = objectMapper.writeValueAsString(Map.of(
+                    "type", type.name(),
+                    "data", data
+            ));
+            Sinks.EmitResult result = sink.tryEmitNext(json);
+
+            if (result.isFailure()) {
+                log.warn("Failed to emit {} to local sink for room {}: {}", type, roomId, result);
+            } else {
+                log.info("Successfully emitted {} to local sink for roomId: {}", type, roomId);
+            }
+        } catch (Exception e) {
+            log.error("Failed to broadcast {} to local sink", type, e);
+        }
     }
 
     private void serializeAndEmit(String roomId, WebSocketMessageType type, Object data, Sinks.Many<String> sink) {
