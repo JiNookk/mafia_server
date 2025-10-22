@@ -10,24 +10,45 @@ ECR_REPOSITORY="jingwook/mafia-server"
 IMAGE_TAG="${1:-latest}"
 CONTAINER_NAME="mafia-server"
 
-# 환경변수 (RDS, ElastiCache 정보를 여기에 입력하세요)
-# 실행 전에 export로 환경변수를 설정하세요:
-# export RDS_ENDPOINT="your-rds.ap-northeast-1.rds.amazonaws.com"
-# export RDS_USERNAME="admin"
-# export RDS_PASSWORD="your-password"
-# export REDIS_ENDPOINT="your-redis.cache.amazonaws.com"
-RDS_ENDPOINT="${RDS_ENDPOINT:-your-rds-endpoint.ap-northeast-1.rds.amazonaws.com}"
-RDS_USERNAME="${RDS_USERNAME:-admin}"
-RDS_PASSWORD="${RDS_PASSWORD:-your-password}"
-REDIS_ENDPOINT="${REDIS_ENDPOINT:-your-elasticache-endpoint.cache.amazonaws.com}"
-
 # 컬러 출력
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
 
 echo -e "${BLUE}🚀 Starting EC2 deployment...${NC}\n"
+
+# 환경변수 검증
+echo -e "${BLUE}0. Checking environment variables...${NC}"
+
+if [ -z "$RDS_ENDPOINT" ]; then
+    echo -e "${RED}❌ RDS_ENDPOINT is not set!${NC}"
+    echo -e "${YELLOW}Please run: export RDS_ENDPOINT=\"your-rds-endpoint\"${NC}"
+    exit 1
+fi
+
+if [ -z "$RDS_USERNAME" ]; then
+    echo -e "${RED}❌ RDS_USERNAME is not set!${NC}"
+    exit 1
+fi
+
+if [ -z "$RDS_PASSWORD" ]; then
+    echo -e "${RED}❌ RDS_PASSWORD is not set!${NC}"
+    exit 1
+fi
+
+if [ -z "$REDIS_ENDPOINT" ]; then
+    echo -e "${RED}❌ REDIS_ENDPOINT is not set!${NC}"
+    echo -e "${YELLOW}Please run: export REDIS_ENDPOINT=\"your-redis-endpoint\"${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ Environment variables:${NC}"
+echo -e "  RDS_ENDPOINT: ${RDS_ENDPOINT}"
+echo -e "  RDS_USERNAME: ${RDS_USERNAME}"
+echo -e "  REDIS_ENDPOINT: ${REDIS_ENDPOINT}"
+echo -e ""
 
 # ECR 로그인
 echo -e "${BLUE}1. Logging in to ECR...${NC}"
