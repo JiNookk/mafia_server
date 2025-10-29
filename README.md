@@ -6,7 +6,7 @@ WebFlux + Redis 기반 실시간 마피아 게임 서버 (8인, WebSocket)
 
 - **Java 21** + **Spring Boot 3.5.6** + **WebFlux** (비동기/논블로킹)
 - **MySQL 8.x** (R2DBC) + **AWS RDS**
-- **Redis** (Valkey) + **AWS ElastiCache** - 상태 캐싱, 분산 락, Pub/Sub
+- **REDIS (AWS ElastiCache valkey)** - 상태 캐싱, 분산 락, Pub/Sub
 - **WebSocket** - 실시간 양방향 통신
 - **Docker** + **AWS ECR** + **Watchtower** (5분 폴링 자동 배포)
 
