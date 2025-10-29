@@ -1,14 +1,9 @@
 -- ========================================
 -- 마피아 게임 서버 데이터베이스 초기화 스크립트
 -- ========================================
-
 -- 데이터베이스 생성 (존재하지 않을 경우)
-CREATE DATABASE IF NOT EXISTS mafia_game
-    CHARACTER SET utf8mb4
-    COLLATE utf8mb4_unicode_ci;
-
+CREATE DATABASE IF NOT EXISTS mafia_game CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE mafia_game;
-
 -- ========================================
 -- 1. Users 테이블
 -- ========================================
@@ -19,8 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '생성 시간',
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '수정 시간',
     INDEX idx_nickname (nickname)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 -- ========================================
 -- 2. Rooms 테이블
 -- ========================================
@@ -35,8 +29,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     INDEX idx_status (status),
     INDEX idx_created_at (created_at DESC),
     FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 -- ========================================
 -- 3. Room Members 테이블 (Room과 User의 Many-to-Many 관계)
 -- ========================================
@@ -53,8 +46,7 @@ CREATE TABLE IF NOT EXISTS room_members (
     INDEX idx_user_id (user_id),
     FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 -- ========================================
 -- 4. Games 테이블
 -- ========================================
@@ -73,8 +65,7 @@ CREATE TABLE IF NOT EXISTS games (
     INDEX idx_finished_at (finished_at),
     INDEX idx_defendant_user_id (defendant_user_id),
     FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 -- ========================================
 -- 5. Game Players 테이블
 -- ========================================
@@ -93,8 +84,7 @@ CREATE TABLE IF NOT EXISTS game_players (
     INDEX idx_game_role (game_id, role),
     FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 -- ========================================
 -- 6. Game Actions 테이블
 -- ========================================
@@ -114,8 +104,7 @@ CREATE TABLE IF NOT EXISTS game_actions (
     FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
     FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 -- ========================================
 -- 7. Chat Messages 테이블
 -- ========================================
@@ -130,4 +119,4 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     INDEX idx_context_type (context_id, chat_type, created_at),
     FOREIGN KEY (context_id) REFERENCES rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
